@@ -1,0 +1,40 @@
+{
+  "name": "csv-bundle-tools",
+  "version": "0.0.0",
+  "description": "A private, in-browser CSV workbench. Open, understand, tidy, and convert CSVs. 100% client-side. Part of Bundle.",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "homepage": "https://csv.bundle.tools",
+  "keywords": [
+    "csv",
+    "in-browser",
+    "privacy",
+    "client-side",
+    "converter",
+    "spreadsheet"
+  ],
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.6",
+    "@sveltejs/kit": "^2.15.1",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "svelte": "^5.16.0",
+    "svelte-check": "^4.1.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "apache-arrow": "^21.2.0"
+  }
+}

@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+.svelte-kit/
+build/
+dist/
+.vite/
+
+# test / coverage
+coverage/
+*.lcov
+
+# env & local
+.env
+.env.*
+!.env.example
+*.local
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+docs/
+CLAUDE.md
+

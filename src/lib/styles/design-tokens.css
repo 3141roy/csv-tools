@@ -1,0 +1,41 @@
+/*
+ * csv.bundle.tools design tokens.
+ * Warm paper ground, hard ink borders and offset shadows, pastel accent colors.
+ *
+ * Fonts (Google Fonts, the only external origin the CSP permits):
+ *   Newsreader (serif display), Space Grotesk (UI and tabular data), Caveat (annotations).
+ */
+:root {
+  /* ground & ink */
+  --paper: #F3EFE2;
+  --panel: #FBF8EF;
+  --panel-2: #FCFBF4;
+  --ink: #17150F;
+  --ink-2: #5C5647;
+  --ink-3: #8A8470;
+
+  /* geometric accents */
+  --sky: #A6DCEF;
+  --sky-d: #2E97CF;
+  --lav: #C6B7F2;
+  --lav-d: #7C63D6;
+  --lime: #CBE85C;
+  --lime-d: #7C8A1E;
+  --terra: #E07A4E;   /* primary CTA + marker annotations */
+  --terra-d: #B0511F;
+
+  /* type */
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-sans: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-hand: "Caveat", "Comic Sans MS", cursive;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* surfaces: thick outlines with hard offset shadows */
+  --border-w: 2.5px;
+  --radius: 12px;
+  --shadow-hard: 5px 5px 0 var(--ink);
+  --shadow-hard-sm: 3px 3px 0 var(--ink);
+}
+
+/* Dark theme, not tuned yet. */
+/* :root[data-theme="dark"] { --paper: #1A1712; --panel: #221E17; --ink: #F4F0E4; ... } */
