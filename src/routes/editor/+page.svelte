@@ -16,8 +16,6 @@ Bug,Free,12,false
 	let fileName = $state('');
 	let error = $state<string | null>(null);
 	let dragging = $state(false);
-	let showPasteBox = $state(false);
-	let pastedText = $state('');
 	let fileInput: HTMLInputElement | undefined = $state();
 
 	function loadText(text: string, name: string) {
@@ -29,8 +27,6 @@ Bug,Free,12,false
 		table = fromRows(rows);
 		fileName = name;
 		error = null;
-		showPasteBox = false;
-		pastedText = '';
 	}
 
 	async function loadFile(file: File) {
@@ -49,8 +45,13 @@ Bug,Free,12,false
 		if (file) loadFile(file);
 	}
 
-	function loadPastedText() {
-		if (pastedText.trim()) loadText(pastedText, 'Pasted data');
+	function onPaste(e: ClipboardEvent) {
+		if (table) return;
+		const text = e.clipboardData?.getData('text');
+		if (text?.trim()) {
+			e.preventDefault();
+			loadText(text, 'Pasted data');
+		}
 	}
 
 	function loadSample() {
@@ -76,37 +77,62 @@ Bug,Free,12,false
 	}
 </script>
 
+<svelte:window onpaste={onPaste} />
+
 <svelte:head>
 	<title>csv.bundle.tools: Editor</title>
 </svelte:head>
 
-<div class="page">
-	<nav class="nav">
-		<a class="wordmark" href="/">csv<span class="dot">.</span></a>
-		{#if table}
+<!-- The page frame + nav live in +layout.svelte, shared with every route. -->
+<div class="editor">
+	{#if table}
+		<div class="file-bar">
 			<div class="file-chip">
 				<span class="file-name">{fileName}</span>
 				<span class="file-meta">{table.rowCount} rows · {table.columns.length} cols</span>
 			</div>
-		{/if}
-		<div class="nav-right">
-			{#if table}
+			<div class="file-bar-right">
 				<button type="button" class="btn btn-secondary" onclick={reset}>Change file</button>
-			{/if}
-			<span class="privacy-note">
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-					<rect x="5" y="10" width="14" height="10" rx="2" stroke="var(--ink)" stroke-width="2.2" />
-					<path d="M8 10V8a4 4 0 0 1 8 0v2" stroke="var(--ink)" stroke-width="2.2" />
-				</svg>
-				On your device
-			</span>
+				<span class="privacy-note">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+						<rect x="5" y="10" width="14" height="10" rx="2" stroke="var(--ink)" stroke-width="2.2" />
+						<path d="M8 10V8a4 4 0 0 1 8 0v2" stroke="var(--ink)" stroke-width="2.2" />
+					</svg>
+					On your device
+				</span>
+			</div>
 		</div>
-	</nav>
+	{/if}
 
 	{#if !table}
+		{#snippet dropContent()}
+			<svg width="48" height="48" viewBox="0 0 48 48" fill="none" class="drop-icon">
+				<rect x="9" y="4" width="26" height="34" rx="3" fill="var(--panel-2)" stroke="var(--ink)" stroke-width="2.4" />
+				<line x1="15" y1="15" x2="29" y2="15" stroke="var(--ink)" stroke-width="2" />
+				<line x1="15" y1="22" x2="29" y2="22" stroke="var(--ink)" stroke-width="2" />
+				<line x1="15" y1="29" x2="23" y2="29" stroke="var(--ink)" stroke-width="2" />
+				<circle cx="35" cy="35" r="10" fill="var(--lime)" stroke="var(--ink-on-accent)" stroke-width="2.4" />
+				<path
+					d="M35 30v9M31 35l4 4 4-4"
+					stroke="var(--ink-on-accent)"
+					stroke-width="2.2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				/>
+			</svg>
+			<h2>Drop a CSV here</h2>
+			<p>or <b>click to choose a file</b> · or paste it from your clipboard</p>
+			{#if error}<p class="error">{error}</p>{/if}
+			<div class="drop-actions">
+				<button type="button" class="btn btn-primary" onclick={() => fileInput?.click()}>
+					Choose a file
+				</button>
+				<button type="button" class="btn btn-secondary" onclick={loadSample}>Try sample data</button>
+			</div>
+		{/snippet}
+
 		<section
-			class="drop-zone"
-			class:dragging
+			class="empty-state"
 			aria-label="CSV file drop zone"
 			ondragover={(e) => {
 				e.preventDefault();
@@ -115,23 +141,71 @@ Bug,Free,12,false
 			ondragleave={() => (dragging = false)}
 			ondrop={onDrop}
 		>
-			<h1>Start with a CSV.</h1>
-			<p>Drop a file here, choose one, paste it in, or try sample data. Nothing leaves this tab.</p>
+			<div class="bg-shapes" aria-hidden="true">
+				<svg class="bg-shape bg-shape-grid" width="140" height="90" viewBox="0 0 140 90" fill="none">
+					<rect x="4" y="4" width="132" height="82" fill="var(--sky)" stroke="var(--ink-on-accent)" stroke-width="3" />
+					<line x1="49" y1="4" x2="49" y2="86" stroke="var(--ink-on-accent)" stroke-width="2" />
+					<line x1="94" y1="4" x2="94" y2="86" stroke="var(--ink-on-accent)" stroke-width="2" />
+					<line x1="4" y1="31" x2="136" y2="31" stroke="var(--ink-on-accent)" stroke-width="2" />
+					<line x1="4" y1="58" x2="136" y2="58" stroke="var(--ink-on-accent)" stroke-width="2" />
+					<rect x="4" y="58" width="45" height="28" fill="var(--lime)" stroke="var(--ink-on-accent)" stroke-width="2" />
+				</svg>
+				<svg class="bg-shape bg-shape-band" width="150" height="90" viewBox="0 0 150 90" fill="none">
+					<defs>
+						<pattern id="bg-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+							<rect width="10" height="10" fill="var(--lav)" />
+							<line x1="0" y1="0" x2="0" y2="10" stroke="var(--ink-on-accent)" stroke-width="3" />
+						</pattern>
+					</defs>
+					<rect x="4" y="4" width="142" height="82" fill="url(#bg-hatch)" stroke="var(--ink-on-accent)" stroke-width="3" />
+				</svg>
+				<svg class="bg-shape bg-shape-triangle" width="120" height="100" viewBox="0 0 120 100" fill="none">
+					<path d="M4 96 60 4l56 92z" fill="var(--lime)" stroke="var(--ink-on-accent)" stroke-width="3" stroke-linejoin="round" />
+				</svg>
+				<svg class="bg-shape bg-shape-square" width="120" height="120" viewBox="0 0 120 120" fill="none">
+					<rect x="4" y="4" width="112" height="112" rx="16" fill="var(--terra)" stroke="var(--ink-on-accent)" stroke-width="3" />
+					<path
+						d="M60 40v32M46 60l14 14 14-14"
+						stroke="var(--ink-on-accent)"
+						stroke-width="3"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+			</div>
 
-			{#if error}
-				<p class="error">{error}</p>
-			{/if}
+			<div class="empty-content">
+				<div class="kicker">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+						<rect x="5" y="10" width="14" height="10" rx="2" stroke="var(--ink-on-accent)" stroke-width="2.4" />
+						<path d="M8 10V8a4 4 0 0 1 8 0v2" stroke="var(--ink-on-accent)" stroke-width="2.4" />
+					</svg>
+					NOTHING LEAVES THIS TAB
+				</div>
 
-			<div class="drop-actions">
-				<button type="button" class="btn btn-primary" onclick={() => fileInput?.click()}>
-					Choose a file
-				</button>
-				<button type="button" class="btn btn-secondary" onclick={() => (showPasteBox = !showPasteBox)}>
-					Paste it in
-				</button>
-				<button type="button" class="btn btn-secondary" onclick={loadSample}>
-					Try sample data
-				</button>
+				<h1>Start with a <span class="headline-italic">CSV</span>.</h1>
+
+				<div class="donut-shell" class:dragging>
+					<div class="donut-outer">
+						<div class="donut-inner">
+							{@render dropContent()}
+						</div>
+					</div>
+					<div class="hand-badge">nothing uploads, promise</div>
+				</div>
+
+				<div class="quiet-shell" class:dragging>
+					{@render dropContent()}
+					<span class="hand-note-plain">nothing uploads, promise</span>
+				</div>
+
+				<div class="stepper">
+					<span class="step"><span class="step-num sky">1</span> Look</span>
+					<span class="step-arrow">→</span>
+					<span class="step"><span class="step-num lime">2</span> Tidy</span>
+					<span class="step-arrow">→</span>
+					<span class="step"><span class="step-num lav">3</span> Convert</span>
+				</div>
 			</div>
 
 			<input
@@ -141,15 +215,17 @@ Bug,Free,12,false
 				onchange={onFileInputChange}
 				hidden
 			/>
-
-			{#if showPasteBox}
-				<div class="paste-box">
-					<textarea bind:value={pastedText} placeholder="name,plan,signups&#10;Ada,Pro,4210" rows="6"
-					></textarea>
-					<button type="button" class="btn btn-primary" onclick={loadPastedText}>Load pasted text</button>
-				</div>
-			{/if}
 		</section>
+
+		<footer class="status-bar centered">
+			<span class="privacy-note">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+					<rect x="5" y="10" width="14" height="10" rx="2" stroke="var(--ink)" stroke-width="2.2" />
+					<path d="M8 10V8a4 4 0 0 1 8 0v2" stroke="var(--ink)" stroke-width="2.2" />
+				</svg>
+				Your file never leaves this browser tab. No upload, no server, no account.
+			</span>
+		</footer>
 	{:else}
 		<div class="grid-wrap">
 			<table>
@@ -189,31 +265,19 @@ Bug,Free,12,false
 </div>
 
 <style>
-	.page {
-		max-width: 1440px;
-		margin: 0 auto;
-		min-height: 100vh;
-		background: var(--paper);
+	.editor {
+		flex: 1;
 		display: flex;
 		flex-direction: column;
 	}
 
-	.nav {
+	.file-bar {
 		display: flex;
 		align-items: center;
 		gap: 24px;
 		padding: 16px clamp(20px, 4.5vw, 40px);
 		border-bottom: var(--border-w) solid var(--ink);
 		flex-wrap: wrap;
-	}
-	.wordmark {
-		font-family: var(--font-serif);
-		font-weight: 700;
-		font-size: 24px;
-		color: var(--ink);
-	}
-	.dot {
-		color: var(--terra);
 	}
 	.file-chip {
 		display: flex;
@@ -226,7 +290,7 @@ Bug,Free,12,false
 		font-weight: 600;
 		color: var(--ink);
 	}
-	.nav-right {
+	.file-bar-right {
 		display: flex;
 		align-items: center;
 		gap: 16px;
@@ -267,32 +331,98 @@ Bug,Free,12,false
 		background: var(--panel-2);
 	}
 
-	.drop-zone {
+	.empty-state {
 		flex: 1;
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		overflow: hidden;
+		padding: 48px 20px;
+	}
+	.empty-content {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		justify-content: center;
-		gap: 18px;
+		gap: 24px;
 		text-align: center;
-		padding: 40px 20px;
-		margin: 24px;
-		border: 3px dashed var(--ink);
-		border-radius: 22px;
-		transition: background-color 0.12s ease;
+		max-width: 620px;
 	}
-	.drop-zone.dragging {
-		background: var(--panel);
-	}
-	.drop-zone h1 {
+	.empty-content h1 {
 		font-family: var(--font-serif);
 		font-weight: 700;
-		font-size: 40px;
+		font-size: clamp(34px, 5vw, 48px);
 		margin: 0;
 	}
-	.drop-zone p {
+	.headline-italic {
+		font-style: italic;
+		color: var(--terra);
+	}
+
+	/* Background shapes crop off the edges of .page (which clips overflow),
+	   pure decoration — hidden once there's no room to let them breathe. */
+	.bg-shapes {
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+	}
+	.bg-shape {
+		position: absolute;
+	}
+	.bg-shape-grid {
+		top: -20px;
+		left: -30px;
+		transform: rotate(-7deg);
+	}
+	.bg-shape-band {
+		top: -10px;
+		right: -40px;
+		transform: rotate(8deg);
+	}
+	.bg-shape-triangle {
+		bottom: -20px;
+		left: -20px;
+		transform: rotate(6deg);
+	}
+	.bg-shape-square {
+		bottom: -30px;
+		right: -30px;
+		transform: rotate(-10deg);
+	}
+	@media (max-width: 900px) {
+		.bg-shapes {
+			display: none;
+		}
+	}
+
+	.kicker {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 12px;
+		font-weight: 600;
+		letter-spacing: 1.5px;
+		color: var(--ink-on-accent);
+		background: var(--lime);
+		border: var(--border-w) solid var(--ink);
+		border-radius: 999px;
+		padding: 6px 14px;
+		box-shadow: var(--shadow-hard-sm);
+	}
+
+	.drop-icon {
+		flex: none;
+	}
+	.empty-content h2 {
+		font-family: var(--font-serif);
+		font-weight: 700;
+		font-size: 26px;
+		margin: 0;
+	}
+	.empty-content p {
 		color: var(--ink-2);
-		max-width: 480px;
 		margin: 0;
 	}
 	.error {
@@ -305,22 +435,124 @@ Bug,Free,12,false
 		justify-content: center;
 		gap: 12px;
 	}
-	.paste-box {
+
+	/* Donut: default above 680px. Below that a shrinking circle leaves too
+	   little room for the buttons inside it, so it's replaced outright by
+	   a plain dashed rounded-rect (.quiet-shell) rather than squashed. */
+	.donut-shell {
+		position: relative;
+		display: flex;
+		justify-content: center;
+	}
+	.donut-outer {
+		width: min(480px, 82vw);
+		aspect-ratio: 1;
+		border-radius: 50%;
+		background: var(--sky);
+		border: 3.5px solid var(--ink);
+		box-shadow: var(--shadow-hard-lg);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 8%;
+		transition: background-color 0.12s ease;
+	}
+	.donut-shell.dragging .donut-outer {
+		background: var(--lime);
+	}
+	.donut-inner {
+		width: 100%;
+		height: 100%;
+		border-radius: 50%;
+		background: var(--panel-2);
+		border: 3px dashed var(--ink);
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
-		width: 100%;
-		max-width: 480px;
+		align-items: center;
+		justify-content: center;
+		gap: 12px;
+		padding: 10%;
+		text-align: center;
 	}
-	.paste-box textarea {
-		font-family: var(--font-mono);
-		font-size: 13px;
-		padding: 12px;
-		border: var(--border-w) solid var(--ink);
+	.hand-badge {
+		position: absolute;
+		top: 6%;
+		left: 2%;
+		font-family: var(--font-hand);
+		font-weight: 700;
+		font-size: 18px;
+		color: var(--terra-d);
+		background: var(--paper);
+		border: 2px solid var(--ink);
 		border-radius: 10px;
+		padding: 4px 12px;
+		transform: rotate(-6deg);
+		box-shadow: var(--shadow-hard-sm);
+	}
+
+	.quiet-shell {
+		display: none;
+		flex-direction: column;
+		align-items: center;
+		gap: 14px;
+		width: 100%;
+		padding: 36px 28px;
+		border: 3px dashed var(--ink);
+		border-radius: 20px;
 		background: var(--panel-2);
-		color: var(--ink);
-		resize: vertical;
+	}
+	.hand-note-plain {
+		font-family: var(--font-hand);
+		font-weight: 700;
+		font-size: 18px;
+		color: var(--terra-d);
+	}
+
+	@media (max-width: 680px) {
+		.donut-shell {
+			display: none;
+		}
+		.quiet-shell {
+			display: flex;
+		}
+	}
+
+	.stepper {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 10px;
+		font-size: 15px;
+		font-weight: 600;
+	}
+	.step {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.step-num {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		border: 2px solid var(--ink);
+		color: var(--ink-on-accent);
+		font-size: 13px;
+	}
+	.step-num.sky {
+		background: var(--sky);
+	}
+	.step-num.lime {
+		background: var(--lime);
+	}
+	.step-num.lav {
+		background: var(--lav);
+	}
+	.step-arrow {
+		color: var(--ink-3);
 	}
 
 	.grid-wrap {
@@ -380,5 +612,8 @@ Bug,Free,12,false
 		border-top: var(--border-w) solid var(--ink);
 		font-size: 13px;
 		color: var(--ink-2);
+	}
+	.status-bar.centered {
+		justify-content: center;
 	}
 </style>
