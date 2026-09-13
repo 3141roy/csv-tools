@@ -1,6 +1,6 @@
 {
   "name": "csv-bundle-tools",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A private, in-browser CSV workbench. Open, understand, tidy, and convert CSVs. 100% client-side. Part of Bundle.",
   "license": "MIT",
   "type": "module",

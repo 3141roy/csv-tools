@@ -3,24 +3,25 @@
 </script>
 
 <svelte:head>
-	<title>csv.bundle.tools: Any CSV, made legible</title>
+	<title>CSV Viewer, Editor &amp; Converter – csv.bundle.tools</title>
 	<meta
 		name="description"
-		content="Open a CSV, sort and filter it, tidy a few cells, and convert it, all in your browser. Nothing uploads, nothing is stored."
+		content="Free online CSV viewer and editor. Sort, filter, and tidy any CSV, then convert it to JSON or Excel, all in your browser. No uploads, no sign-up, 100% private."
 	/>
-	<meta property="og:title" content="csv.bundle.tools: Any CSV, made legible" />
+	<link rel="canonical" href="https://csv.bundle.tools/" />
+	<meta property="og:title" content="CSV Viewer, Editor & Converter – csv.bundle.tools" />
 	<meta
 		property="og:description"
-		content="Sort, filter, tidy, and convert any CSV, right in your browser. Nothing uploads, nothing is stored."
+		content="Sort, filter, tidy, and convert any CSV to JSON or Excel, right in your browser. No uploads, no sign-up, 100% private."
 	/>
 	<meta property="og:image" content="https://csv.bundle.tools/og-image.png" />
 	<meta property="og:type" content="website" />
 	<meta property="og:url" content="https://csv.bundle.tools/" />
 	<meta name="twitter:card" content="summary_large_image" />
-	<meta name="twitter:title" content="csv.bundle.tools: Any CSV, made legible" />
+	<meta name="twitter:title" content="CSV Viewer, Editor & Converter – csv.bundle.tools" />
 	<meta
 		name="twitter:description"
-		content="Sort, filter, tidy, and convert any CSV, right in your browser. Nothing uploads, nothing is stored."
+		content="Sort, filter, tidy, and convert any CSV to JSON or Excel, right in your browser. No uploads, no sign-up, 100% private."
 	/>
 	<meta name="twitter:image" content="https://csv.bundle.tools/og-image.png" />
 </svelte:head>

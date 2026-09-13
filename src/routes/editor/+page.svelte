@@ -473,7 +473,12 @@ Bug,Free,12,false
 <svelte:window onpaste={onPaste} onclick={onWindowClick} />
 
 <svelte:head>
-	<title>csv.bundle.tools: Editor</title>
+	<title>CSV Editor – csv.bundle.tools</title>
+	<meta
+		name="description"
+		content="Open a CSV file and view, sort, filter, and edit it in a spreadsheet-style grid, then convert it to JSON or Excel. Runs entirely in your browser, nothing uploads."
+	/>
+	<link rel="canonical" href="https://csv.bundle.tools/editor" />
 </svelte:head>
 
 <!-- The page frame lives in +layout.svelte, shared with every route. This
