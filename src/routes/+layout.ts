@@ -1,3 +1,3 @@
-// Pure static SPA, no server render, no server runtime.
-export const ssr = false;
+
+export const ssr = true;
 export const prerender = true;
