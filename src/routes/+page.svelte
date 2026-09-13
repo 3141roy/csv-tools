@@ -4,6 +4,25 @@
 
 <svelte:head>
 	<title>csv.bundle.tools: Any CSV, made legible</title>
+	<meta
+		name="description"
+		content="Open a CSV, sort and filter it, tidy a few cells, and convert it, all in your browser. Nothing uploads, nothing is stored."
+	/>
+	<meta property="og:title" content="csv.bundle.tools: Any CSV, made legible" />
+	<meta
+		property="og:description"
+		content="Sort, filter, tidy, and convert any CSV, right in your browser. Nothing uploads, nothing is stored."
+	/>
+	<meta property="og:image" content="https://csv.bundle.tools/og-image.png" />
+	<meta property="og:type" content="website" />
+	<meta property="og:url" content="https://csv.bundle.tools/" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="csv.bundle.tools: Any CSV, made legible" />
+	<meta
+		name="twitter:description"
+		content="Sort, filter, tidy, and convert any CSV, right in your browser. Nothing uploads, nothing is stored."
+	/>
+	<meta name="twitter:image" content="https://csv.bundle.tools/og-image.png" />
 </svelte:head>
 
 <!-- The page frame lives in +layout.svelte, shared with every route. This

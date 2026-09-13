@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { Table, fromIPC } from '$lib/core/table';
+	import { Table, fromIPC, ROW_ID_COLUMN } from '$lib/core/table';
 	import type { OperationInvocation } from '$lib/core/types';
 	import type { CsvParseOptions } from '$lib/formats/csv/parse';
 	import { ENCODINGS } from '$lib/formats/csv/decode';
@@ -50,6 +50,11 @@ Bug,Free,12,false
 
 	let latestParseRequestId = 0;
 	let latestApplyRequestId = 0;
+	let latestEditRequestId = 0;
+	// Edits aren't "latest wins" like filter/sort — every one must resolve
+	// on its own, so each gets its own pending entry instead of being
+	// dropped as superseded.
+	const pendingEdits = new Map<number, { resolve: (t: Table) => void; reject: (e: Error) => void }>();
 
 	function ensureWorker(): Worker {
 		if (!worker) {
@@ -66,6 +71,15 @@ Bug,Free,12,false
 					sourceTable = fromIPC(res.ipc);
 					parseOptions = { ...parseOptions, delimiter: res.delimiter };
 					error = null;
+				} else if (res.type === 'editCell') {
+					const pending = pendingEdits.get(res.requestId);
+					pendingEdits.delete(res.requestId);
+					if (!pending) return;
+					if (!res.ok) {
+						pending.reject(new Error(res.error));
+						return;
+					}
+					pending.resolve(fromIPC(res.ipc));
 				} else {
 					if (res.requestId !== latestApplyRequestId) return; // superseded
 					applying = false;
@@ -80,6 +94,23 @@ Bug,Free,12,false
 			};
 		}
 		return worker;
+	}
+
+	/** Runs edit-cell in the worker against `table` and resolves with the updated Table. */
+	function editCellInWorker(table: Table, rowId: number, column: string, value: unknown): Promise<Table> {
+		return new Promise((resolve, reject) => {
+			const requestId = ++latestEditRequestId;
+			pendingEdits.set(requestId, { resolve, reject });
+			const req: CsvWorkerRequest = {
+				type: 'editCell',
+				requestId,
+				tableIpc: table.toIPC(),
+				rowId,
+				column,
+				value
+			};
+			ensureWorker().postMessage(req);
+		});
 	}
 
 	function parseBytes(buffer: ArrayBuffer) {
@@ -166,6 +197,12 @@ Bug,Free,12,false
 		if (rawBytes) parseBytes(rawBytes);
 	}
 
+	/** Autofocuses (and selects) the input a cell edit opens. */
+	function focusOnMount(el: HTMLInputElement) {
+		el.focus();
+		el.select();
+	}
+
 	function typeBadge(type: string): string {
 		if (type === 'number') return 'num';
 		if (type === 'boolean') return 'bool';
@@ -178,6 +215,41 @@ Bug,Free,12,false
 
 	function selectColumn(name: string) {
 		selectedColumn = selectedColumn === name ? null : name;
+	}
+
+	// Double-click a cell to edit it. Identified by the hidden row-id (not
+	// the displayed row index), so the edit lands on the right row even if
+	// a filter/sort reorders or hides rows underneath it while the input is
+	// open.
+	let editingCell = $state<{ rowId: number; column: string } | null>(null);
+	let editingDraft = $state('');
+
+	function startEditingCell(row: Record<string, unknown>, column: string) {
+		if (applying) return;
+		const rowId = row[ROW_ID_COLUMN];
+		if (typeof rowId !== 'number') return;
+		editingCell = { rowId, column };
+		editingDraft = row[column] === null || row[column] === undefined ? '' : String(row[column]);
+	}
+
+	function cancelEditingCell() {
+		editingCell = null;
+	}
+
+	async function commitEditingCell() {
+		if (!editingCell || !sourceTable) return;
+		const { rowId, column } = editingCell;
+		const value = editingDraft;
+		applying = true;
+		try {
+			sourceTable = await editCellInWorker(sourceTable, rowId, column, value);
+			editingCell = null;
+			error = null;
+		} catch (err) {
+			error = err instanceof Error ? err.message : String(err);
+		} finally {
+			applying = false;
+		}
 	}
 
 	const inspected = $derived(
@@ -316,10 +388,16 @@ Bug,Free,12,false
 	const searchFilteredRows = $derived.by(() => {
 		if (!displayedTable || !debouncedSearch.trim()) return null;
 		const q = debouncedSearch.toLowerCase();
+		// Search only the visible columns, not the hidden row-id column that
+		// rides along in every row object.
+		const names = displayedTable.columns.map((c) => c.name);
 		return displayedTable
 			.toRows()
 			.filter((row) =>
-				Object.values(row).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(q))
+				names.some((name) => {
+					const v = row[name];
+					return v !== null && v !== undefined && String(v).toLowerCase().includes(q);
+				})
 			);
 	});
 
@@ -778,14 +856,32 @@ Bug,Free,12,false
 							<tr>
 								<td class="row-num-col">{index + 1}</td>
 								{#each displayedTable.columns as col (col.name)}
+									{@const isEditing =
+										editingCell?.rowId === row[ROW_ID_COLUMN] && editingCell?.column === col.name}
 									<td
 										class:numeric={col.type === 'number'}
 										class:selected-col={selectedColumn === col.name}
 										class:sorted-col={sort?.column === col.name}
+										class:editing-cell={isEditing}
+										ondblclick={() => startEditingCell(row, col.name)}
 									>
-										{row[col.name] === null || row[col.name] === undefined
-											? ''
-											: String(row[col.name])}
+										{#if isEditing}
+											<input
+												class="cell-edit-input"
+												type={col.type === 'number' ? 'number' : 'text'}
+												bind:value={editingDraft}
+												onblur={commitEditingCell}
+												onkeydown={(e) => {
+													if (e.key === 'Enter') commitEditingCell();
+													else if (e.key === 'Escape') cancelEditingCell();
+												}}
+												use:focusOnMount
+											/>
+										{:else}
+											{row[col.name] === null || row[col.name] === undefined
+												? ''
+												: String(row[col.name])}
+										{/if}
 									</td>
 								{/each}
 							</tr>
@@ -1671,6 +1767,22 @@ Bug,Free,12,false
 		width: 44px;
 		color: var(--ink-3);
 		text-align: right;
+	}
+	tbody td:not(.row-num-col) {
+		cursor: text;
+	}
+	td.editing-cell {
+		padding: 0;
+	}
+	.cell-edit-input {
+		width: 100%;
+		box-sizing: border-box;
+		font: inherit;
+		color: inherit;
+		background: var(--panel-2);
+		border: 1.4px solid var(--terra);
+		border-radius: 0;
+		padding: 6px 10px;
 	}
 
 	.inspector {

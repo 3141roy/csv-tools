@@ -12,12 +12,21 @@ function inferColumnType(field: arrow.Field): ColumnType {
 	return 'unknown';
 }
 
+// A hidden per-row id, assigned once at ingestion (see csv.worker.ts) and
+// carried through untouched by filter/sort (Arquero passes unreferenced
+// columns through). Lets an edit find the right row in sourceTable no
+// matter what's currently filtered, sorted, or paginated. Excluded from
+// `.columns` below so it never reaches the grid, inspector, or exports.
+export const ROW_ID_COLUMN = '__csv_tools_row_id__';
+
 function columnsFromSchema(schema: arrow.Schema): ColumnMeta[] {
-	return schema.fields.map((field) => ({
-		name: field.name,
-		type: inferColumnType(field),
-		nullable: field.nullable
-	}));
+	return schema.fields
+		.filter((field) => field.name !== ROW_ID_COLUMN)
+		.map((field) => ({
+			name: field.name,
+			type: inferColumnType(field),
+			nullable: field.nullable
+		}));
 }
 
 /** Wraps an Arrow table so surfaces depend on `TableShape`, never on Arrow directly. */

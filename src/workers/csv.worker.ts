@@ -6,8 +6,9 @@
 import * as arrow from 'apache-arrow';
 import { parseCsv } from '../lib/formats/csv/parse';
 import { decodeBytes } from '../lib/formats/csv/decode';
-import { fromIPC } from '../lib/core/table';
+import { fromIPC, ROW_ID_COLUMN, Table as ArrowTable } from '../lib/core/table';
 import { selectEngine } from '../lib/engine/select-engine';
+import { registry } from '../lib/core/operation-registry';
 import type { OperationInvocation } from '../lib/core/types';
 
 export interface CsvParseRequest {
@@ -26,7 +27,16 @@ export interface ApplyLogRequest {
 	log: OperationInvocation[];
 }
 
-export type CsvWorkerRequest = CsvParseRequest | ApplyLogRequest;
+export interface EditCellRequest {
+	type: 'editCell';
+	requestId: number;
+	tableIpc: Uint8Array;
+	rowId: number;
+	column: string;
+	value: unknown;
+}
+
+export type CsvWorkerRequest = CsvParseRequest | ApplyLogRequest | EditCellRequest;
 
 export type CsvParseResponse =
 	| { type: 'parse'; requestId: number; ok: true; ipc: Uint8Array; delimiter: string }
@@ -36,7 +46,11 @@ export type ApplyLogResponse =
 	| { type: 'applyLog'; requestId: number; ok: true; ipc: Uint8Array; engine: string }
 	| { type: 'applyLog'; requestId: number; ok: false; error: string };
 
-export type CsvWorkerResponse = CsvParseResponse | ApplyLogResponse;
+export type EditCellResponse =
+	| { type: 'editCell'; requestId: number; ok: true; ipc: Uint8Array }
+	| { type: 'editCell'; requestId: number; ok: false; error: string };
+
+export type CsvWorkerResponse = CsvParseResponse | ApplyLogResponse | EditCellResponse;
 
 // The app's tsconfig loads DOM lib types (for the rest of the app), which
 // declares `self` as `Window`, conflicting with the worker-scope `self` this
@@ -57,7 +71,8 @@ function handleParse(req: CsvParseRequest) {
 			ctx.postMessage({ type: 'parse', requestId, ok: false, error: "Couldn't find any rows." });
 			return;
 		}
-		const ipc = arrow.tableToIPC(arrow.tableFromJSON(rows));
+		const withIds = rows.map((row, i) => ({ ...row, [ROW_ID_COLUMN]: i }));
+		const ipc = arrow.tableToIPC(arrow.tableFromJSON(withIds));
 		ctx.postMessage({ type: 'parse', requestId, ok: true, ipc, delimiter: detected }, [ipc.buffer]);
 	} catch (err) {
 		ctx.postMessage({
@@ -87,7 +102,34 @@ async function handleApplyLog(req: ApplyLogRequest) {
 	}
 }
 
+// Not engine-tiered (Arquero vs DuckDB) like applyLog — a single-row edit
+// isn't a scale-sensitive query, it's one direct registry op.
+function handleEditCell(req: EditCellRequest) {
+	const { requestId, tableIpc, rowId, column, value } = req;
+	try {
+		const table = fromIPC(tableIpc);
+		// The registry is typed against the abstract Table shape (so
+		// operations never depend on the concrete class), but edit-cell
+		// actually returns one — see operations/edit-cell.
+		const result = registry.applyOne(table, {
+			opId: 'edit-cell',
+			params: { rowId, column, value },
+			enabled: true
+		}) as ArrowTable;
+		const ipc = result.toIPC();
+		ctx.postMessage({ type: 'editCell', requestId, ok: true, ipc }, [ipc.buffer]);
+	} catch (err) {
+		ctx.postMessage({
+			type: 'editCell',
+			requestId,
+			ok: false,
+			error: err instanceof Error ? err.message : String(err)
+		});
+	}
+}
+
 ctx.onmessage = (e) => {
 	if (e.data.type === 'parse') handleParse(e.data);
+	else if (e.data.type === 'editCell') handleEditCell(e.data);
 	else handleApplyLog(e.data);
 };

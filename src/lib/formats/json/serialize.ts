@@ -2,5 +2,9 @@
 import type { Table } from '../../core/types';
 
 export function tableToJson(table: Table): string {
-	return JSON.stringify(table.toRows(), null, 2);
+	// Built from table.columns, not the raw row objects, so a hidden
+	// internal column (the row-id edit-cell relies on) never leaks out.
+	const names = table.columns.map((c) => c.name);
+	const rows = table.toRows().map((row) => Object.fromEntries(names.map((name) => [name, row[name]])));
+	return JSON.stringify(rows, null, 2);
 }

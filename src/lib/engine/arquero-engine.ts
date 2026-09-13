@@ -6,12 +6,15 @@ import { filterRows } from '../operations/filter-rows';
 import { manifest as filterRowsManifest } from '../operations/filter-rows/manifest';
 import { sortRows } from '../operations/sort-rows';
 import { manifest as sortRowsManifest } from '../operations/sort-rows/manifest';
+import { editCell } from '../operations/edit-cell';
+import { manifest as editCellManifest } from '../operations/edit-cell/manifest';
 import type { Engine } from './engine';
 import type { Table } from '../core/table';
 
 if (!registry.manifests().some((m) => m.id === 'filter-rows')) {
 	registry.register(filterRows, filterRowsManifest);
 	registry.register(sortRows, sortRowsManifest);
+	registry.register(editCell, editCellManifest);
 }
 
 export const arqueroEngine: Engine = {
