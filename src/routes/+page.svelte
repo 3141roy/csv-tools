@@ -160,6 +160,82 @@
 		</div>
 	</section>
 
+	<!-- PREVIEW -->
+	<section class="preview-section">
+		<div class="section-head">
+			<h2>One clean table. That's the app.</h2>
+		</div>
+		<p class="section-lede">
+			Open a file and this is what you get, a real grid with sortable columns and typed
+			cells, not a mockup.
+		</p>
+
+		<div class="preview-frame">
+			<div class="preview-inner">
+			<div class="preview-filebar">
+				<div class="preview-file">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"
+							stroke="var(--sky-d)"
+							stroke-width="1.8"
+						/>
+					</svg>
+					<span class="preview-filename">customers_sample.csv</span>
+					<span class="preview-meta">12,481 rows · 8 cols</span>
+				</div>
+				<span class="privacy-note-sm">
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+						<rect x="5" y="10" width="14" height="10" rx="2" stroke="var(--ink)" stroke-width="2.2" />
+						<path d="M8 10V8a4 4 0 0 1 8 0v2" stroke="var(--ink)" stroke-width="2.2" />
+					</svg>
+					On your device
+				</span>
+			</div>
+
+			<div class="preview-table-wrap">
+				<table class="preview-table">
+					<thead>
+						<tr>
+							<th></th>
+							<th>id</th>
+							<th>name</th>
+							<th>email</th>
+							<th>country</th>
+							<th>plan</th>
+							<th class="sorted">signups ↓</th>
+							<th>joined</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each [
+							{ id: 1021, name: 'Ada Lovelace', email: 'ada@example.com', country: 'UK', plan: 'Pro', signups: '4,210', joined: '2023-02-11' },
+							{ id: 1023, name: 'Grace Hopper', email: 'grace@example.com', country: 'US', plan: 'Pro', signups: '3,980', joined: '2022-11-19' },
+							{ id: 1029, name: 'Tim Berners-Lee', email: 'tim@example.com', country: 'UK', plan: 'Pro', signups: '3,120', joined: '2022-05-30' },
+							{ id: 1026, name: 'Margaret Hamilton', email: 'peg@example.com', country: 'US', plan: 'Pro', signups: '2,765', joined: '2022-08-15' },
+							{ id: 1031, name: 'Sophie Wilson', email: 'sophie@example.com', country: 'UK', plan: 'Team', signups: '2,450', joined: '2023-01-07' },
+							{ id: 1027, name: 'Dennis Ritchie', email: 'dmr@example.com', country: 'US', plan: 'Team', signups: '1,890', joined: '2023-04-22' },
+							{ id: 1035, name: 'Rajeev Motwani', email: 'rajeev@example.com', country: 'IN', plan: 'Team', signups: '1,610', joined: '2023-05-09' },
+							{ id: 1036, name: 'Linus Torvalds', email: 'linus@example.com', country: 'FI', plan: 'Free', signups: '1,180', joined: '2023-07-22' }
+						] as row, i (row.id)}
+							<tr>
+								<td class="row-num">{i + 1}</td>
+								<td>{row.id}</td>
+								<td>{row.name}</td>
+								<td>{row.email}</td>
+								<td>{row.country}</td>
+								<td><span class="plan-chip {row.plan.toLowerCase()}">{row.plan}</span></td>
+								<td class="sorted numeric">{row.signups}</td>
+								<td>{row.joined}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</div>
+		</div>
+	</section>
+
 	<!-- FOOTER -->
 	<footer class="footer">
 		<div><b>csv.bundle.tools</b> · part of Bundle · free &amp; open source</div>
@@ -470,6 +546,117 @@
 		line-height: 1.5;
 		color: var(--ink-2);
 		margin: 0;
+	}
+
+	/* PREVIEW */
+	.preview-section {
+		padding: 16px clamp(20px, 4.5vw, 64px) 56px;
+	}
+	.section-lede {
+		font-size: 16px;
+		color: var(--ink-2);
+		max-width: 720px;
+		margin: 0 0 24px;
+	}
+	.preview-frame {
+		position: relative;
+		border: var(--border-w) solid var(--ink);
+		border-radius: 16px;
+		box-shadow: var(--shadow-hard-lg);
+	}
+	/* Its own layer, radius/overflow separate from .preview-frame, so the
+	   handwritten badge can sit above the frame's top edge without the
+	   frame's own corner-clipping cutting it off. */
+	.preview-inner {
+		background: var(--panel);
+		border-radius: 13.5px;
+		overflow: hidden;
+	}
+	.preview-filebar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 14px 20px;
+		border-bottom: var(--border-w) solid var(--ink);
+		background: var(--panel-2);
+		flex-wrap: wrap;
+	}
+	.preview-file {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		font-size: 14px;
+	}
+	.preview-filename {
+		font-weight: 600;
+		color: var(--ink);
+	}
+	.preview-meta {
+		color: var(--ink-2);
+	}
+	.privacy-note-sm {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--ink-2);
+	}
+	.preview-table-wrap {
+		overflow-x: auto;
+	}
+	.preview-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 13.5px;
+		white-space: nowrap;
+	}
+	.preview-table th,
+	.preview-table td {
+		padding: 9px 14px;
+		text-align: left;
+	}
+	.preview-table thead th {
+		border-bottom: var(--border-w) solid var(--ink);
+		font-weight: 600;
+	}
+	.preview-table tbody td {
+		border-bottom: 1px solid var(--hairline);
+	}
+	.preview-table th.sorted {
+		background: var(--lav);
+		color: var(--ink-on-accent);
+	}
+	.preview-table td.sorted {
+		background: rgba(198, 183, 242, 0.22);
+	}
+	.preview-table td.numeric {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+		font-weight: 600;
+	}
+	.row-num {
+		color: var(--ink-3);
+	}
+	.plan-chip {
+		display: inline-block;
+		font-size: 12px;
+		font-weight: 600;
+		border: 1.4px solid var(--ink);
+		border-radius: 999px;
+		padding: 1px 10px;
+	}
+	.plan-chip.pro {
+		background: var(--lime);
+		color: var(--ink-on-accent);
+	}
+	.plan-chip.team {
+		background: var(--sky);
+		color: var(--ink-on-accent);
+	}
+	.plan-chip.free {
+		background: var(--panel);
 	}
 
 	/* FOOTER */
