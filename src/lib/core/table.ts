@@ -47,5 +47,10 @@ export class Table implements TableShape {
 export function fromRows(rows: ReadonlyArray<Record<string, unknown>>): Table {
 	// A zero-row input infers no columns at all, since there is nothing to describe.
 	// Revisit if a caller needs a known-but-empty schema, e.g. a header-only CSV.
+	//
+	// Known gap: a column that is null in every row is silently dropped, since
+	// Arrow can't infer a type for it. Only matters for a column that's blank
+	// across an entire loaded file; revisit if that turns out to be common
+	// (fill it in as a nullable text column instead of inferring nothing).
 	return new Table(arrow.tableFromJSON(rows as Record<string, unknown>[]));
 }

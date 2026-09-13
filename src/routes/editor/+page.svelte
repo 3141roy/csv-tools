@@ -1,9 +1,32 @@
+<script module lang="ts">
+	// Registered once per module load, not per component instance — the
+	// registry is a shared singleton, and re-registering on every mount
+	// (e.g. navigating back to this route) would throw on the duplicate id.
+	import { registry } from '$lib/core/operation-registry';
+	import { filterRows } from '$lib/operations/filter-rows';
+	import { manifest as filterRowsManifest } from '$lib/operations/filter-rows/manifest';
+	import { sortRows } from '$lib/operations/sort-rows';
+	import { manifest as sortRowsManifest } from '$lib/operations/sort-rows/manifest';
+
+	if (!registry.manifests().some((m) => m.id === 'filter-rows')) {
+		registry.register(filterRows, filterRowsManifest);
+		registry.register(sortRows, sortRowsManifest);
+	}
+</script>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import type { Table } from '$lib/core/types';
+	import type { Table, OperationInvocation } from '$lib/core/types';
 	import { fromRows } from '$lib/core/table';
 	import { parseCsv } from '$lib/formats/csv/parse';
+	import type { CsvParseOptions } from '$lib/formats/csv/parse';
+	import { decodeBytes, ENCODINGS } from '$lib/formats/csv/decode';
+	import { tableToCsv } from '$lib/formats/csv/serialize';
+	import { tableToJson } from '$lib/formats/json/serialize';
+	import { columnStats } from '$lib/core/column-stats';
+	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
+	import type { FilterRowsParams } from '$lib/operations/filter-rows/manifest';
 
 	const SAMPLE_CSV = `name,plan,signups,active
 Ada,Pro,4210,true
@@ -12,21 +35,29 @@ Alan,Team,1560,true
 Bug,Free,12,false
 `;
 
-	let table = $state<Table | null>(null);
+	let rawText = $state('');
+	let sourceTable = $state<Table | null>(null);
 	let fileName = $state('');
 	let error = $state<string | null>(null);
 	let dragging = $state(false);
 	let fileInput: HTMLInputElement | undefined = $state();
+	let parseOptions = $state<CsvParseOptions>({ hasHeader: true });
 
 	function loadText(text: string, name: string) {
-		const { rows } = parseCsv(text);
+		const { rows, delimiter } = parseCsv(text, parseOptions);
 		if (rows.length === 0) {
 			error = "Couldn't find any rows in that file.";
 			return;
 		}
-		table = fromRows(rows);
+		rawText = text;
+		parseOptions = { ...parseOptions, delimiter };
+		sourceTable = fromRows(rows);
 		fileName = name;
 		error = null;
+		filters = [];
+		sort = null;
+		searchQuery = '';
+		selectedColumn = null;
 	}
 
 	async function loadFile(file: File) {
@@ -46,7 +77,7 @@ Bug,Free,12,false
 	}
 
 	function onPaste(e: ClipboardEvent) {
-		if (table) return;
+		if (sourceTable) return;
 		const text = e.clipboardData?.getData('text');
 		if (text?.trim()) {
 			e.preventDefault();
@@ -63,8 +94,27 @@ Bug,Free,12,false
 	});
 
 	function reset() {
-		table = null;
+		sourceTable = null;
+		rawText = '';
 		fileName = '';
+		error = null;
+		selectedColumn = null;
+	}
+
+	// Re-parses the original text with new delimiter/header settings —
+	// filters and sort are kept as-is; if a column they reference no
+	// longer exists, applyOne/applyLog will just throw, so re-validate.
+	function updateParseOptions(next: Partial<CsvParseOptions>) {
+		parseOptions = { ...parseOptions, ...next };
+		if (rawText) loadTextKeepingOptions();
+	}
+	function loadTextKeepingOptions() {
+		const { rows } = parseCsv(rawText, parseOptions);
+		if (rows.length === 0) {
+			error = "Couldn't find any rows with those settings.";
+			return;
+		}
+		sourceTable = fromRows(rows);
 		error = null;
 	}
 
@@ -75,24 +125,156 @@ Bug,Free,12,false
 		if (type === 'text') return 'txt';
 		return '?';
 	}
+
+	let selectedColumn = $state<string | null>(null);
+
+	function selectColumn(name: string) {
+		selectedColumn = selectedColumn === name ? null : name;
+	}
+
+	const inspected = $derived(
+		sourceTable && selectedColumn
+			? {
+					name: selectedColumn,
+					meta: sourceTable.columns.find((c) => c.name === selectedColumn)!,
+					stats: columnStats(sourceTable.getColumn(selectedColumn))
+				}
+			: null
+	);
+
+	// --- Filters + sort: an operation-log, exactly what the pipeline is ---
+	type FilterPill = { id: number; params: FilterRowsParams };
+	let filters = $state<FilterPill[]>([]);
+	let nextFilterId = 0;
+	let sort = $state<{ column: string; direction: 'asc' | 'desc' } | null>(null);
+	let searchQuery = $state('');
+
+	let showAddFilter = $state(false);
+	let newFilterColumn = $state('');
+	let newFilterOperator = $state<FilterRowsParams['operator']>('contains');
+	let newFilterValue = $state('');
+
+	const OPERATOR_LABELS: Record<FilterRowsParams['operator'], string> = {
+		eq: 'is',
+		neq: 'is not',
+		contains: 'contains',
+		gte: '≥',
+		lte: '≤',
+		isEmpty: 'is empty',
+		notEmpty: 'is not empty'
+	};
+	const NEEDS_VALUE: ReadonlyArray<FilterRowsParams['operator']> = ['eq', 'neq', 'contains', 'gte', 'lte'];
+
+	function addFilter() {
+		if (!newFilterColumn) return;
+		const value = NEEDS_VALUE.includes(newFilterOperator)
+			? sourceTable?.columns.find((c) => c.name === newFilterColumn)?.type === 'number'
+				? Number(newFilterValue)
+				: newFilterValue
+			: undefined;
+		filters = [
+			...filters,
+			{ id: nextFilterId++, params: { column: newFilterColumn, operator: newFilterOperator, value } }
+		];
+		showAddFilter = false;
+		newFilterValue = '';
+	}
+	function removeFilter(id: number) {
+		filters = filters.filter((f) => f.id !== id);
+	}
+	function filterLabel(params: FilterRowsParams): string {
+		const opLabel = OPERATOR_LABELS[params.operator];
+		return NEEDS_VALUE.includes(params.operator)
+			? `${params.column} ${opLabel} ${params.value}`
+			: `${params.column} ${opLabel}`;
+	}
+
+	function toggleSort(column: string) {
+		if (sort?.column !== column) sort = { column, direction: 'asc' };
+		else if (sort.direction === 'asc') sort = { column, direction: 'desc' };
+		else sort = null;
+	}
+
+	const displayedTable = $derived.by(() => {
+		if (!sourceTable) return null;
+		const log: OperationInvocation[] = filters.map((f) => ({
+			opId: 'filter-rows',
+			params: f.params,
+			enabled: true
+		}));
+		if (sort) log.push({ opId: 'sort-rows', params: sort, enabled: true });
+		return registry.applyLog(sourceTable, log);
+	});
+
+	const visibleRows = $derived.by(() => {
+		if (!displayedTable) return [];
+		const rows = displayedTable.toRows();
+		if (!searchQuery.trim()) return rows;
+		const q = searchQuery.toLowerCase();
+		return rows.filter((row) =>
+			Object.values(row).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(q))
+		);
+	});
+
+	// --- Format popover ---
+	let formatOpen = $state(false);
+	let formatWrapEl: HTMLDivElement | undefined = $state();
+
+	function onWindowClick(e: MouseEvent) {
+		if (formatOpen && formatWrapEl && !formatWrapEl.contains(e.target as Node)) {
+			formatOpen = false;
+		}
+	}
+
+	// --- Export ---
+	let exportOpen = $state(false);
+	function download(content: string, filename: string, mimeType: string) {
+		const blob = new Blob([content], { type: mimeType });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+	function exportCsv() {
+		if (!displayedTable) return;
+		download(tableToCsv(displayedTable), fileName.replace(/\.csv$/i, '') + '.csv', 'text/csv');
+		exportOpen = false;
+	}
+	function exportJson() {
+		if (!displayedTable) return;
+		download(tableToJson(displayedTable), fileName.replace(/\.csv$/i, '') + '.json', 'application/json');
+		exportOpen = false;
+	}
 </script>
 
-<svelte:window onpaste={onPaste} />
+<svelte:window onpaste={onPaste} onclick={onWindowClick} />
 
 <svelte:head>
 	<title>csv.bundle.tools: Editor</title>
 </svelte:head>
 
-<!-- The page frame + nav live in +layout.svelte, shared with every route. -->
+<!-- The page frame lives in +layout.svelte, shared with every route. This
+     is the editor's own app bar — not the landing page's marketing nav. -->
 <div class="editor">
-	{#if table}
-		<div class="file-bar">
+	<div class="file-bar">
+		<a class="wordmark" href="/">csv<span class="dot">.</span></a>
+		{#if sourceTable}
 			<div class="file-chip">
+				<svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+					<path
+						d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"
+						stroke="var(--sky-d)"
+						stroke-width="1.8"
+					/>
+				</svg>
 				<span class="file-name">{fileName}</span>
-				<span class="file-meta">{table.rowCount} rows · {table.columns.length} cols</span>
+				<span class="file-meta">{sourceTable.rowCount} rows · {sourceTable.columns.length} cols</span>
 			</div>
-			<div class="file-bar-right">
-				<button type="button" class="btn btn-secondary" onclick={reset}>Change file</button>
+		{/if}
+		<div class="file-bar-right">
+			{#if sourceTable}
 				<span class="privacy-note">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
 						<rect x="5" y="10" width="14" height="10" rx="2" stroke="var(--ink)" stroke-width="2.2" />
@@ -100,11 +282,115 @@ Bug,Free,12,false
 					</svg>
 					On your device
 				</span>
+				<button type="button" class="btn btn-secondary" onclick={reset}>Change file</button>
+				<div class="export-wrap">
+					<button type="button" class="btn btn-primary" onclick={() => (exportOpen = !exportOpen)}>
+						Export
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+							<path d="M6 9l6 6 6-6" stroke="var(--ink-on-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					</button>
+					{#if exportOpen}
+						<div class="export-menu">
+							<button type="button" onclick={exportCsv}>Export as CSV</button>
+							<button type="button" onclick={exportJson}>Export as JSON</button>
+						</div>
+					{/if}
+				</div>
+			{/if}
+			<ThemeToggle />
+		</div>
+	</div>
+
+	{#if sourceTable}
+
+		<div class="toolbar">
+			<div class="format-wrap" bind:this={formatWrapEl}>
+				<button type="button" class="format-btn" onclick={() => (formatOpen = !formatOpen)}>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+						<line x1="4" y1="7" x2="20" y2="7" stroke="var(--ink-on-accent)" stroke-width="2.2" stroke-linecap="round" />
+						<line x1="4" y1="12" x2="20" y2="12" stroke="var(--ink-on-accent)" stroke-width="2.2" stroke-linecap="round" />
+						<line x1="4" y1="17" x2="14" y2="17" stroke="var(--ink-on-accent)" stroke-width="2.2" stroke-linecap="round" />
+					</svg>
+					Format
+				</button>
+				{#if formatOpen}
+					<div class="format-popover">
+						<h3>How to read this file</h3>
+						<p>We guessed. Change anything that looks wrong.</p>
+
+						<span class="popover-label">Delimiter</span>
+						<div class="segmented">
+							{#each [[',', 'Comma'], [';', 'Semicolon'], ['\t', 'Tab']] as [value, label] (value)}
+								<button
+									type="button"
+									class:active={parseOptions.delimiter === value}
+									onclick={() => updateParseOptions({ delimiter: value })}
+								>
+									{label}
+								</button>
+							{/each}
+						</div>
+
+						<label class="toggle-row">
+							<span>First row is a header</span>
+							<input
+								type="checkbox"
+								checked={parseOptions.hasHeader}
+								onchange={(e) => updateParseOptions({ hasHeader: e.currentTarget.checked })}
+							/>
+						</label>
+					</div>
+				{/if}
 			</div>
+
+			<span class="toolbar-rule"></span>
+
+			<span class="toolbar-label">Filters</span>
+			{#each filters as f (f.id)}
+				<span class="pill filter-pill">
+					{filterLabel(f.params)}
+					<button type="button" onclick={() => removeFilter(f.id)} aria-label="Remove filter">×</button>
+				</span>
+			{/each}
+
+			{#if !showAddFilter}
+				<button type="button" class="pill add-filter" onclick={() => (showAddFilter = true)}>
+					+ Filter
+				</button>
+			{:else}
+				<div class="add-filter-form">
+					<select bind:value={newFilterColumn}>
+						<option value="">Column</option>
+						{#each sourceTable.columns as col (col.name)}
+							<option value={col.name}>{col.name}</option>
+						{/each}
+					</select>
+					<select bind:value={newFilterOperator}>
+						{#each Object.entries(OPERATOR_LABELS) as [op, label] (op)}
+							<option value={op}>{label}</option>
+						{/each}
+					</select>
+					{#if NEEDS_VALUE.includes(newFilterOperator)}
+						<input type="text" bind:value={newFilterValue} placeholder="Value" />
+					{/if}
+					<button type="button" class="btn btn-secondary btn-sm" onclick={addFilter}>Add</button>
+				</div>
+			{/if}
+
+			{#if sort}
+				<span class="toolbar-rule"></span>
+				<span class="pill sort-pill">
+					{sort.column} {sort.direction === 'asc' ? '↑' : '↓'}
+					<button type="button" onclick={() => (sort = null)} aria-label="Clear sort">×</button>
+				</span>
+			{/if}
+
+			<input class="search" type="text" bind:value={searchQuery} placeholder="Find in table…" />
 		</div>
 	{/if}
 
-	{#if !table}
+	{#if !sourceTable}
 		{#snippet dropContent()}
 			<svg width="48" height="48" viewBox="0 0 48 48" fill="none" class="drop-icon">
 				<rect x="9" y="4" width="26" height="34" rx="3" fill="var(--panel-2)" stroke="var(--ink)" stroke-width="2.4" />
@@ -226,39 +512,109 @@ Bug,Free,12,false
 				Your file never leaves this browser tab. No upload, no server, no account.
 			</span>
 		</footer>
-	{:else}
-		<div class="grid-wrap">
-			<table>
-				<thead>
-					<tr>
-						<th class="row-num-col"></th>
-						{#each table.columns as col (col.name)}
-							<th>
-								<span class="col-name">{col.name}</span>
-								<span class="type-badge">{typeBadge(col.type)}</span>
-							</th>
-						{/each}
-					</tr>
-				</thead>
-				<tbody>
-					{#each table.toRows() as row, i (i)}
+	{:else if displayedTable}
+		<div class="editor-body">
+			<div class="grid-wrap">
+				<table>
+					<thead>
 						<tr>
-							<td class="row-num-col">{i + 1}</td>
-							{#each table.columns as col (col.name)}
-								<td class:numeric={col.type === 'number'}>
-									{row[col.name] === null || row[col.name] === undefined
-										? ''
-										: String(row[col.name])}
-								</td>
+							<th class="row-num-col"></th>
+							{#each displayedTable.columns as col (col.name)}
+								<th class:selected-col={selectedColumn === col.name} class:sorted-col={sort?.column === col.name}>
+									<button type="button" class="th-content" onclick={() => selectColumn(col.name)}>
+										<span class="col-name">{col.name}</span>
+										<span class="type-badge">{typeBadge(col.type)}</span>
+									</button>
+									<button
+										type="button"
+										class="sort-btn"
+										onclick={(e) => {
+											e.stopPropagation();
+											toggleSort(col.name);
+										}}
+										aria-label="Sort by {col.name}"
+									>
+										{sort?.column === col.name ? (sort.direction === 'asc' ? '↑' : '↓') : '↕'}
+									</button>
+								</th>
 							{/each}
 						</tr>
-					{/each}
-				</tbody>
-			</table>
+					</thead>
+					<tbody>
+						{#each visibleRows as row, i (i)}
+							<tr>
+								<td class="row-num-col">{i + 1}</td>
+								{#each displayedTable.columns as col (col.name)}
+									<td
+										class:numeric={col.type === 'number'}
+										class:selected-col={selectedColumn === col.name}
+										class:sorted-col={sort?.column === col.name}
+									>
+										{row[col.name] === null || row[col.name] === undefined
+											? ''
+											: String(row[col.name])}
+									</td>
+								{/each}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				{#if visibleRows.length === 0}
+					<p class="no-rows">No rows match the current filters.</p>
+				{/if}
+			</div>
+
+			{#if inspected}
+				<aside class="inspector">
+					<div class="inspector-head">
+						<span class="col-name">{inspected.name}</span>
+						<span class="type-badge">{typeBadge(inspected.meta.type)}</span>
+					</div>
+					<p class="inspector-note">A glance to help spot outliers and gaps, not a full report.</p>
+
+					<div class="stat-grid">
+						<div class="stat">
+							<span class="stat-label">Empty</span>
+							<span class="stat-value">{inspected.stats.emptyPct}%</span>
+						</div>
+						<div class="stat">
+							<span class="stat-label">Unique</span>
+							<span class="stat-value">{inspected.stats.uniqueCount}</span>
+						</div>
+						<div class="stat">
+							<span class="stat-label">Min</span>
+							<span class="stat-value">{inspected.stats.min ?? ''}</span>
+						</div>
+						<div class="stat">
+							<span class="stat-label">Max</span>
+							<span class="stat-value">{inspected.stats.max ?? ''}</span>
+						</div>
+					</div>
+
+					{#if inspected.stats.histogram.length > 0}
+						<div class="histogram">
+							{#each inspected.stats.histogram as count, idx (idx)}
+								<span
+									class="bar"
+									style="height: {(count / Math.max(...inspected.stats.histogram)) * 100}%"
+								></span>
+							{/each}
+						</div>
+					{/if}
+				</aside>
+			{/if}
 		</div>
 
 		<footer class="status-bar">
-			<span>{table.rowCount} rows · {table.columns.length} cols</span>
+			<span>
+				{visibleRows.length} of {sourceTable?.rowCount} rows shown
+				{#if filters.length > 0}
+					· {filters.length} filter{filters.length === 1 ? '' : 's'}
+				{/if}
+				{#if sort}
+					· sorted by {sort.column} {sort.direction === 'asc' ? '↑' : '↓'}
+				{/if}
+			</span>
 			<span class="privacy-note">Everything stays on your device.</span>
 		</footer>
 	{/if}
@@ -279,10 +635,19 @@ Bug,Free,12,false
 		border-bottom: var(--border-w) solid var(--ink);
 		flex-wrap: wrap;
 	}
+	.wordmark {
+		font-family: var(--font-serif);
+		font-weight: 700;
+		font-size: 24px;
+		color: var(--ink);
+	}
+	.dot {
+		color: var(--terra);
+	}
 	.file-chip {
 		display: flex;
-		align-items: baseline;
-		gap: 10px;
+		align-items: center;
+		gap: 8px;
 		font-size: 14px;
 		color: var(--ink-2);
 	}
@@ -329,6 +694,198 @@ Bug,Free,12,false
 	}
 	.btn-secondary {
 		background: var(--panel-2);
+	}
+	.btn-sm {
+		padding: 6px 12px;
+		font-size: 13px;
+		box-shadow: var(--shadow-hard-sm);
+	}
+
+	.export-wrap {
+		position: relative;
+	}
+	.export-menu {
+		position: absolute;
+		top: calc(100% + 6px);
+		right: 0;
+		z-index: 5;
+		display: flex;
+		flex-direction: column;
+		background: var(--panel);
+		border: var(--border-w) solid var(--ink);
+		border-radius: 10px;
+		box-shadow: var(--shadow-hard);
+		overflow: hidden;
+		min-width: 160px;
+	}
+	.export-menu button {
+		background: none;
+		border: none;
+		text-align: left;
+		padding: 10px 14px;
+		font: inherit;
+		font-weight: 600;
+		color: var(--ink);
+		cursor: pointer;
+	}
+	.export-menu button:hover {
+		background: var(--panel-2);
+	}
+
+	/* TOOLBAR */
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex-wrap: wrap;
+		padding: 12px clamp(20px, 4.5vw, 40px);
+		border-bottom: var(--border-w) solid var(--ink);
+	}
+	.toolbar-rule {
+		width: 1.5px;
+		align-self: stretch;
+		background: var(--ink-3);
+		opacity: 0.4;
+	}
+	.toolbar-label {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--ink-2);
+	}
+	.pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 13px;
+		font-weight: 600;
+		border: 1.6px solid var(--ink);
+		border-radius: 999px;
+		padding: 5px 10px;
+	}
+	.pill button {
+		background: none;
+		border: none;
+		font: inherit;
+		font-weight: 700;
+		color: inherit;
+		cursor: pointer;
+		line-height: 1;
+	}
+	.filter-pill {
+		background: var(--sky);
+		color: var(--ink-on-accent);
+	}
+	.sort-pill {
+		background: var(--lav);
+		color: var(--ink-on-accent);
+	}
+	.add-filter {
+		background: none;
+		border: 1.6px dashed var(--ink-3);
+		color: var(--ink-2);
+		cursor: pointer;
+	}
+	.add-filter-form {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+	.add-filter-form select,
+	.add-filter-form input,
+	.search {
+		font: inherit;
+		font-size: 13px;
+		border: var(--border-w) solid var(--ink);
+		border-radius: 8px;
+		padding: 6px 10px;
+		background: var(--panel-2);
+		color: var(--ink);
+	}
+	.search {
+		margin-left: auto;
+		width: 200px;
+	}
+
+	.format-wrap {
+		position: relative;
+	}
+	.format-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-weight: 600;
+		font-size: 14px;
+		color: var(--ink-on-accent);
+		background: var(--lime);
+		border: var(--border-w) solid var(--ink);
+		border-radius: 10px;
+		padding: 8px 14px;
+		box-shadow: var(--shadow-hard-sm);
+		cursor: pointer;
+	}
+	.format-popover {
+		position: absolute;
+		top: calc(100% + 8px);
+		left: 0;
+		z-index: 5;
+		width: 320px;
+		background: var(--panel);
+		border: var(--border-w) solid var(--ink);
+		border-radius: 14px;
+		box-shadow: var(--shadow-hard);
+		padding: 18px;
+	}
+	.format-popover h3 {
+		font-family: var(--font-serif);
+		font-size: 17px;
+		margin: 0 0 4px;
+	}
+	.format-popover p {
+		font-size: 13px;
+		color: var(--ink-2);
+		margin: 0 0 14px;
+	}
+	.popover-label {
+		display: block;
+		font-size: 10.5px;
+		font-weight: 700;
+		letter-spacing: 0.5px;
+		text-transform: uppercase;
+		color: var(--ink-3);
+		margin-bottom: 6px;
+	}
+	.segmented {
+		display: flex;
+		border: var(--border-w) solid var(--ink);
+		border-radius: 8px;
+		overflow: hidden;
+		margin-bottom: 16px;
+	}
+	.segmented button {
+		flex: 1;
+		background: var(--panel-2);
+		border: none;
+		border-right: 1.5px solid var(--ink);
+		padding: 8px 4px;
+		font: inherit;
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.segmented button:last-child {
+		border-right: none;
+	}
+	.segmented button.active {
+		background: var(--sky);
+		color: var(--ink-on-accent);
+	}
+	.toggle-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		font-size: 14px;
+		font-weight: 600;
 	}
 
 	.empty-state {
@@ -555,10 +1112,22 @@ Bug,Free,12,false
 		color: var(--ink-3);
 	}
 
+	.editor-body {
+		flex: 1;
+		display: flex;
+		min-height: 0;
+	}
 	.grid-wrap {
 		flex: 1;
+		min-width: 0; /* without this a wide table forces the flex row to grow
+			instead of scrolling in place, pushing the inspector off the edge */
 		overflow: auto;
 		padding: 0 clamp(20px, 4.5vw, 40px);
+	}
+	.no-rows {
+		padding: 32px 0;
+		text-align: center;
+		color: var(--ink-2);
 	}
 	table {
 		width: 100%;
@@ -580,6 +1149,45 @@ Bug,Free,12,false
 		position: sticky;
 		top: 0;
 		font-weight: 600;
+		white-space: nowrap;
+	}
+	thead th.selected-col {
+		background: var(--sky);
+		color: var(--ink-on-accent);
+	}
+	thead th.sorted-col {
+		background: var(--lav);
+		color: var(--ink-on-accent);
+	}
+	td.selected-col {
+		background: rgba(166, 220, 239, 0.22);
+	}
+	td.sorted-col {
+		background: rgba(198, 183, 242, 0.22);
+	}
+	.th-content {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		background: none;
+		border: none;
+		font: inherit;
+		font-weight: inherit;
+		color: inherit;
+		padding: 0;
+		cursor: pointer;
+	}
+	.sort-btn {
+		background: none;
+		border: none;
+		color: var(--ink-3);
+		font-size: 13px;
+		cursor: pointer;
+		padding: 0 0 0 6px;
+	}
+	th.selected-col .sort-btn,
+	th.sorted-col .sort-btn {
+		color: inherit;
 	}
 	.col-name {
 		margin-right: 8px;
@@ -603,6 +1211,77 @@ Bug,Free,12,false
 		width: 44px;
 		color: var(--ink-3);
 		text-align: right;
+	}
+
+	.inspector {
+		flex: none;
+		width: 260px;
+		padding: 20px;
+		border-left: var(--border-w) solid var(--ink);
+		background: var(--panel);
+		overflow-y: auto;
+	}
+	.inspector-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 8px;
+	}
+	.inspector-head .col-name {
+		font-family: var(--font-serif);
+		font-weight: 700;
+		font-size: 18px;
+	}
+	.inspector-note {
+		font-family: var(--font-hand);
+		font-size: 15px;
+		color: var(--ink-3);
+		margin: 0 0 18px;
+	}
+	.stat-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 14px;
+		margin-bottom: 20px;
+	}
+	.stat {
+		background: var(--panel-2);
+		border: var(--border-w) solid var(--ink);
+		border-radius: 10px;
+		padding: 10px 12px;
+	}
+	.stat-label {
+		display: block;
+		font-size: 10.5px;
+		font-weight: 700;
+		letter-spacing: 0.5px;
+		color: var(--ink-3);
+		text-transform: uppercase;
+	}
+	.stat-value {
+		display: block;
+		font-family: var(--font-serif);
+		font-weight: 700;
+		font-size: 21px;
+	}
+	.histogram {
+		display: flex;
+		align-items: flex-end;
+		gap: 4px;
+		height: 60px;
+	}
+	.histogram .bar {
+		flex: 1;
+		min-height: 2px;
+		background: var(--sky);
+		border: 2px solid var(--ink);
+		border-radius: 2px 2px 0 0;
+	}
+
+	@media (max-width: 720px) {
+		.inspector {
+			display: none;
+		}
 	}
 
 	.status-bar {
