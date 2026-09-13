@@ -1,16 +1,13 @@
-// Pure: (table, params) => table.
+// Pure: (table, params) => table. Uses Arquero for the
+// actual sort — columnar, type-aware, and never materializes row objects
+// for the whole table the way a hand-rolled Array.sort over toRows() does.
+import * as aq from 'arquero';
 import type { Operation, Table } from '../../core/types';
-import { fromRows } from '../../core/table';
+import { Table as ArrowTable, fromRows } from '../../core/table';
 import type { SortRowsParams } from './manifest';
 
 function isEmpty(value: unknown): boolean {
 	return value === null || value === undefined || value === '';
-}
-
-function compareValues(a: unknown, b: unknown): number {
-	if (typeof a === 'number' && typeof b === 'number') return a - b;
-	if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b);
-	return String(a).localeCompare(String(b));
 }
 
 export const sortRows: Operation<SortRowsParams> = {
@@ -19,24 +16,26 @@ export const sortRows: Operation<SortRowsParams> = {
 		if (!table.columns.some((c) => c.name === params.column)) {
 			throw new Error(`Unknown column: ${params.column}`);
 		}
-		const sign = params.direction === 'desc' ? -1 : 1;
-		const sorted = table
-			.toRows()
-			.map((row, index) => ({ row, index })) // stable sort: tie-break on original position
-			.sort((a, b) => {
-				const av = a.row[params.column];
-				const bv = b.row[params.column];
-				const aEmpty = isEmpty(av);
-				const bEmpty = isEmpty(bv);
-				// Empties always sort last, regardless of direction.
-				if (aEmpty || bEmpty) {
-					if (aEmpty && bEmpty) return a.index - b.index;
-					return aEmpty ? 1 : -1;
-				}
-				const cmp = compareValues(av, bv) * sign;
-				return cmp !== 0 ? cmp : a.index - b.index;
-			})
-			.map(({ row }) => row);
-		return fromRows(sorted);
+		// Arquero types its Arrow interop against its own bundled Arrow reader
+		// (Flechette), not the apache-arrow package we use elsewhere — the two
+		// are runtime-interoperable as *input* (same IPC format) but not the
+		// same TS nominal type, hence the cast through `unknown` here.
+		const dt = aq.fromArrow((table as ArrowTable).toArrow() as unknown as Parameters<typeof aq.fromArrow>[0]);
+		const { column, direction } = params;
+		// Arquero's own null handling is NULLS FIRST ascending / NULLS LAST
+		// descending (standard SQL default) — ours is nulls always last,
+		// regardless of direction, so sort on an is-empty flag first.
+		const nullsLastFlag = aq.escape((d: Record<string, unknown>) => (isEmpty(d[column]) ? 1 : 0));
+		const valueKey = direction === 'desc' ? aq.desc(column) : column;
+		const sorted = dt.orderby(nullsLastFlag, valueKey);
+		// Deliberately NOT sorted.toArrow(): confirmed by direct reproduction
+		// that Arquero's own toArrow() output is not a real apache-arrow
+		// Table — arrow.tableToIPC() on it silently writes 0 bytes (no
+		// error), and anything built from it (getRows, export, a second
+		// operation) then breaks on "Cannot read properties of undefined"
+		// inside apache-arrow's internals. .objects() is Arquero's own,
+		// correct, plain-row accessor; fromRows() rebuilds a genuine table
+		// from it the same way the initial CSV parse does.
+		return fromRows(sorted.objects() as Record<string, unknown>[]);
 	}
 };

@@ -1,32 +1,17 @@
-<script module lang="ts">
-	// Registered once per module load, not per component instance — the
-	// registry is a shared singleton, and re-registering on every mount
-	// (e.g. navigating back to this route) would throw on the duplicate id.
-	import { registry } from '$lib/core/operation-registry';
-	import { filterRows } from '$lib/operations/filter-rows';
-	import { manifest as filterRowsManifest } from '$lib/operations/filter-rows/manifest';
-	import { sortRows } from '$lib/operations/sort-rows';
-	import { manifest as sortRowsManifest } from '$lib/operations/sort-rows/manifest';
-
-	if (!registry.manifests().some((m) => m.id === 'filter-rows')) {
-		registry.register(filterRows, filterRowsManifest);
-		registry.register(sortRows, sortRowsManifest);
-	}
-</script>
-
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import type { Table, OperationInvocation } from '$lib/core/types';
-	import { fromRows } from '$lib/core/table';
-	import { parseCsv } from '$lib/formats/csv/parse';
+	import { Table, fromIPC } from '$lib/core/table';
+	import type { OperationInvocation } from '$lib/core/types';
 	import type { CsvParseOptions } from '$lib/formats/csv/parse';
-	import { decodeBytes, ENCODINGS } from '$lib/formats/csv/decode';
+	import { ENCODINGS } from '$lib/formats/csv/decode';
 	import { tableToCsv } from '$lib/formats/csv/serialize';
 	import { tableToJson } from '$lib/formats/json/serialize';
 	import { columnStats } from '$lib/core/column-stats';
 	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
 	import type { FilterRowsParams } from '$lib/operations/filter-rows/manifest';
+	import CsvWorker from '../../workers/csv.worker?worker';
+	import type { CsvWorkerRequest, CsvWorkerResponse } from '../../workers/csv.worker';
 
 	const SAMPLE_CSV = `name,plan,signups,active
 Ada,Pro,4210,true
@@ -35,33 +20,98 @@ Alan,Team,1560,true
 Bug,Free,12,false
 `;
 
-	let rawText = $state('');
-	let sourceTable = $state<Table | null>(null);
+	// Original bytes, kept so the Format popover can re-parse (a different
+	// delimiter, header toggle, or encoding) without re-reading the file.
+	let rawBytes: ArrayBuffer | null = null;
+	// $state.raw, not $state — a plain $state deep-proxies the value, and
+	// wrapping an apache-arrow Table in a reactive Proxy corrupts its
+	// internals (confirmed: Table.getRows -> arrowTable.slice() threw
+	// "Cannot read properties of undefined" only once a table reached this
+	// state; the same slice on an unwrapped table works fine). raw is
+	// correct anyway since the whole reference is always replaced, never
+	// mutated in place.
+	let sourceTable = $state.raw<Table | null>(null);
 	let fileName = $state('');
 	let error = $state<string | null>(null);
 	let dragging = $state(false);
+	let loading = $state(false);
 	let fileInput: HTMLInputElement | undefined = $state();
 	let parseOptions = $state<CsvParseOptions>({ hasHeader: true });
+	let encoding = $state('utf-8');
 
-	function loadText(text: string, name: string) {
-		const { rows, delimiter } = parseCsv(text, parseOptions);
-		if (rows.length === 0) {
-			error = "Couldn't find any rows in that file.";
-			return;
+	// Both parsing and applying the filter/sort log run in a worker
+	// (csv.worker.ts), never the main thread — real CPU + allocation work
+	// on a large file that belongs off the main thread. Without this, a
+	// filter or sort on tens of thousands of rows blocks the tab for its
+	// entire duration: no rendering, no input.
+	let worker: Worker | undefined;
+	let applying = $state(false);
+	let engineUsed = $state<string | null>(null);
+
+	let latestParseRequestId = 0;
+	let latestApplyRequestId = 0;
+
+	function ensureWorker(): Worker {
+		if (!worker) {
+			worker = new CsvWorker();
+			worker.onmessage = (e: MessageEvent<CsvWorkerResponse>) => {
+				const res = e.data;
+				if (res.type === 'parse') {
+					if (res.requestId !== latestParseRequestId) return; // superseded
+					loading = false;
+					if (!res.ok) {
+						error = res.error;
+						return;
+					}
+					sourceTable = fromIPC(res.ipc);
+					parseOptions = { ...parseOptions, delimiter: res.delimiter };
+					error = null;
+				} else {
+					if (res.requestId !== latestApplyRequestId) return; // superseded
+					applying = false;
+					if (!res.ok) {
+						error = res.error;
+						return;
+					}
+					displayedTable = fromIPC(res.ipc);
+					engineUsed = res.engine;
+					error = null;
+				}
+			};
 		}
-		rawText = text;
-		parseOptions = { ...parseOptions, delimiter };
-		sourceTable = fromRows(rows);
+		return worker;
+	}
+
+	function parseBytes(buffer: ArrayBuffer) {
+		loading = true;
+		const requestId = ++latestParseRequestId;
+		const req: CsvWorkerRequest = {
+			type: 'parse',
+			requestId,
+			buffer,
+			encoding,
+			delimiter: parseOptions.delimiter,
+			hasHeader: parseOptions.hasHeader
+		};
+		ensureWorker().postMessage(req);
+	}
+
+	function loadBytes(buffer: ArrayBuffer, name: string) {
+		rawBytes = buffer;
 		fileName = name;
-		error = null;
 		filters = [];
 		sort = null;
 		searchQuery = '';
 		selectedColumn = null;
+		parseBytes(buffer);
+	}
+
+	function loadText(text: string, name: string) {
+		loadBytes(new TextEncoder().encode(text).buffer, name);
 	}
 
 	async function loadFile(file: File) {
-		loadText(await file.text(), file.name);
+		loadBytes(await file.arrayBuffer(), file.name);
 	}
 
 	function onFileInputChange(e: Event) {
@@ -91,31 +141,29 @@ Bug,Free,12,false
 
 	onMount(() => {
 		if (page.url.searchParams.has('sample')) loadSample();
+		return () => worker?.terminate();
 	});
 
 	function reset() {
 		sourceTable = null;
-		rawText = '';
+		displayedTable = null;
+		rawBytes = null;
 		fileName = '';
 		error = null;
 		selectedColumn = null;
+		engineUsed = null;
 	}
 
-	// Re-parses the original text with new delimiter/header settings —
+	// Re-parses the original bytes with new delimiter/header/encoding —
 	// filters and sort are kept as-is; if a column they reference no
-	// longer exists, applyOne/applyLog will just throw, so re-validate.
+	// longer exists, applyOne/applyLog will just throw on the next use.
 	function updateParseOptions(next: Partial<CsvParseOptions>) {
 		parseOptions = { ...parseOptions, ...next };
-		if (rawText) loadTextKeepingOptions();
+		if (rawBytes) parseBytes(rawBytes);
 	}
-	function loadTextKeepingOptions() {
-		const { rows } = parseCsv(rawText, parseOptions);
-		if (rows.length === 0) {
-			error = "Couldn't find any rows with those settings.";
-			return;
-		}
-		sourceTable = fromRows(rows);
-		error = null;
+	function updateEncoding(next: string) {
+		encoding = next;
+		if (rawBytes) parseBytes(rawBytes);
 	}
 
 	function typeBadge(type: string): string {
@@ -141,6 +189,29 @@ Bug,Free,12,false
 				}
 			: null
 	);
+
+	// The health strip shows every column's shape at once (against the full
+	// file, not the current filter/sort) — a quick "what am I dealing with"
+	// scan, separate from the rail's per-column deep dive.
+	const columnHealth = $derived.by(() => {
+		const table = sourceTable;
+		if (!table) return [];
+		return table.columns.map((col) => ({
+			name: col.name,
+			type: col.type,
+			stats: columnStats(table.getColumn(col.name))
+		}));
+	});
+
+	const flaggedColumn = $derived.by(() => {
+		let worst: { name: string; emptyCount: number } | null = null;
+		for (const c of columnHealth) {
+			if (c.stats.emptyCount > 0 && (!worst || c.stats.emptyCount > worst.emptyCount)) {
+				worst = { name: c.name, emptyCount: c.stats.emptyCount };
+			}
+		}
+		return worst;
+	});
 
 	// --- Filters + sort: an operation-log, exactly what the pipeline is ---
 	type FilterPill = { id: number; params: FilterRowsParams };
@@ -195,25 +266,97 @@ Bug,Free,12,false
 		else sort = null;
 	}
 
-	const displayedTable = $derived.by(() => {
-		if (!sourceTable) return null;
+	let displayedTable = $state.raw<Table | null>(null); // see sourceTable's comment — same reason
+
+	// Runs the filter/sort log in the worker whenever it (or the source
+	// table) changes. An empty log is the common case — just opened a
+	// file, no filters or sort yet — so it's handled inline with no
+	// worker round trip; nothing to apply.
+	$effect(() => {
+		if (!sourceTable) {
+			displayedTable = null;
+			return;
+		}
+		// $state.snapshot() strips the reactive Proxy Svelte wraps objects in —
+		// without it, postMessage throws synchronously ("could not be cloned")
+		// since browsers can't structured-clone a Proxy. That throw happens
+		// inside this $effect, uncaught, which was silently killing this
+		// effect's future reactivity — the actual cause behind sort/filter
+		// appearing to work once then stop responding to anything.
 		const log: OperationInvocation[] = filters.map((f) => ({
 			opId: 'filter-rows',
-			params: f.params,
+			params: $state.snapshot(f.params),
 			enabled: true
 		}));
-		if (sort) log.push({ opId: 'sort-rows', params: sort, enabled: true });
-		return registry.applyLog(sourceTable, log);
+		if (sort) log.push({ opId: 'sort-rows', params: $state.snapshot(sort), enabled: true });
+
+		if (log.length === 0) {
+			displayedTable = sourceTable;
+			engineUsed = null; // nothing ran — passthrough, not a decision either engine made
+			return;
+		}
+		applying = true;
+		const requestId = ++latestApplyRequestId;
+		const req: CsvWorkerRequest = { type: 'applyLog', requestId, tableIpc: sourceTable.toIPC(), log };
+		ensureWorker().postMessage(req);
 	});
 
-	const visibleRows = $derived.by(() => {
-		if (!displayedTable) return [];
-		const rows = displayedTable.toRows();
-		if (!searchQuery.trim()) return rows;
-		const q = searchQuery.toLowerCase();
-		return rows.filter((row) =>
-			Object.values(row).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(q))
-		);
+	// "Find in table" is debounced and only materializes rows at all when
+	// there's actually something to search for — scanning every row's every
+	// column (real, measured: ~470ms at 60k rows) shouldn't run on every
+	// keystroke, only once typing settles, and never when the box is empty.
+	let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+	let debouncedSearch = $state('');
+	function onSearchInput(value: string) {
+		searchQuery = value;
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => (debouncedSearch = value), 150);
+	}
+
+	const searchFilteredRows = $derived.by(() => {
+		if (!displayedTable || !debouncedSearch.trim()) return null;
+		const q = debouncedSearch.toLowerCase();
+		return displayedTable
+			.toRows()
+			.filter((row) =>
+				Object.values(row).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(q))
+			);
+	});
+
+	const totalVisibleRows = $derived(
+		searchFilteredRows ? searchFilteredRows.length : (displayedTable?.rowCount ?? 0)
+	);
+
+	// --- Pagination: a 10MB file can be 100k+ rows. Rendering one <tr> per
+	// row is the single biggest cost of loading a large file, real DOM
+	// nodes for every row, all alive at once — and scroll-position-based
+	// virtualization (spacer row heights tracking scrollTop) is exactly
+	// the kind of stateful math that's easy to get subtly wrong. A fixed
+	// page of rows is simpler to reason about and to verify correct: no
+	// scroll tracking, no estimated row height, no spacer rows. When
+	// there's no active search, pull only the current page straight from
+	// the Table (getRows) instead of materializing every row first. ---
+	const PAGE_SIZE = 100;
+	let currentPage = $state(0);
+
+	// A new table (loaded, filtered, or sorted) or a new search invalidates
+	// whatever page you were on — back to the start rather than showing an
+	// empty page 40 of a now-much-shorter result set.
+	$effect(() => {
+		displayedTable;
+		debouncedSearch;
+		currentPage = 0;
+	});
+
+	const pageCount = $derived(Math.max(1, Math.ceil(totalVisibleRows / PAGE_SIZE)));
+
+	const pageRows = $derived.by(() => {
+		const start = currentPage * PAGE_SIZE;
+		const end = Math.min(totalVisibleRows, start + PAGE_SIZE);
+		const rows = searchFilteredRows
+			? searchFilteredRows.slice(start, end)
+			: (displayedTable?.getRows(start, end) ?? []);
+		return rows.map((row, i) => ({ row, index: start + i }));
 	});
 
 	// --- Format popover ---
@@ -303,6 +446,62 @@ Bug,Free,12,false
 	</div>
 
 	{#if sourceTable}
+		<div class="column-strip">
+			<div class="column-strip-head">
+				<span class="strip-label">Columns, type, gaps, spread</span>
+				{#if flaggedColumn}
+					<span class="strip-flag">
+						{flaggedColumn.emptyCount} row{flaggedColumn.emptyCount === 1 ? '' : 's'} flagged, {flaggedColumn.name}
+						has holes
+					</span>
+				{/if}
+			</div>
+			<div class="strip-cards">
+				{#each columnHealth as col (col.name)}
+					<button
+						type="button"
+						class="strip-card"
+						class:selected={selectedColumn === col.name}
+						onclick={() => selectColumn(col.name)}
+					>
+						<div class="strip-card-head">
+							<div class="strip-name-row">
+								<span class="col-name">{col.name}</span>
+								<span class="type-badge">{typeBadge(col.type)}</span>
+							</div>
+							{#if col.stats.emptyPct > 0}
+								<span class="strip-empty">{col.stats.emptyPct}% empty</span>
+							{/if}
+						</div>
+						{#if col.type === 'number' && col.stats.histogram.length > 0}
+							<div class="strip-sparkline">
+								{#each col.stats.histogram as count, i (i)}
+									<span
+										class="spark-bar"
+										style="height: {(count / Math.max(...col.stats.histogram)) * 100}%"
+									></span>
+								{/each}
+							</div>
+						{:else}
+							<div class="strip-bar-track">
+								<span
+									class="strip-bar-fill"
+									class:warn={col.stats.emptyPct > 0}
+									style="width: {100 - col.stats.emptyPct}%"
+								></span>
+							</div>
+						{/if}
+						<span class="strip-sub">
+							{#if col.type === 'number' || col.type === 'date'}
+								{col.stats.min ?? ''}&ndash;{col.stats.max ?? ''}
+							{:else}
+								{col.stats.uniqueCount} uniq
+							{/if}
+						</span>
+					</button>
+				{/each}
+			</div>
+		</div>
 
 		<div class="toolbar">
 			<div class="format-wrap" bind:this={formatWrapEl}>
@@ -340,6 +539,17 @@ Bug,Free,12,false
 								onchange={(e) => updateParseOptions({ hasHeader: e.currentTarget.checked })}
 							/>
 						</label>
+
+						<span class="popover-label">Encoding</span>
+						<select
+							class="encoding-select"
+							value={encoding}
+							onchange={(e) => updateEncoding(e.currentTarget.value)}
+						>
+							{#each ENCODINGS as opt (opt.value)}
+								<option value={opt.value}>{opt.label}</option>
+							{/each}
+						</select>
 					</div>
 				{/if}
 			</div>
@@ -386,7 +596,13 @@ Bug,Free,12,false
 				</span>
 			{/if}
 
-			<input class="search" type="text" bind:value={searchQuery} placeholder="Find in table…" />
+			<input
+				class="search"
+				type="text"
+				value={searchQuery}
+				oninput={(e) => onSearchInput(e.currentTarget.value)}
+				placeholder="Find in table…"
+			/>
 		</div>
 	{/if}
 
@@ -409,12 +625,16 @@ Bug,Free,12,false
 			<h2>Drop a CSV here</h2>
 			<p>or <b>click to choose a file</b> · or paste it from your clipboard</p>
 			{#if error}<p class="error">{error}</p>{/if}
-			<div class="drop-actions">
-				<button type="button" class="btn btn-primary" onclick={() => fileInput?.click()}>
-					Choose a file
-				</button>
-				<button type="button" class="btn btn-secondary" onclick={loadSample}>Try sample data</button>
-			</div>
+			{#if loading}
+				<p class="loading-note">Reading your file…</p>
+			{:else}
+				<div class="drop-actions">
+					<button type="button" class="btn btn-primary" onclick={() => fileInput?.click()}>
+						Choose a file
+					</button>
+					<button type="button" class="btn btn-secondary" onclick={loadSample}>Try sample data</button>
+				</div>
+			{/if}
 		{/snippet}
 
 		<section
@@ -513,8 +733,21 @@ Bug,Free,12,false
 			</span>
 		</footer>
 	{:else if displayedTable}
+		{#if error}
+			<div class="error-banner">
+				<span>{error}</span>
+				<button type="button" onclick={() => (error = null)} aria-label="Dismiss">×</button>
+			</div>
+		{/if}
 		<div class="editor-body">
-			<div class="grid-wrap">
+			<div class="grid-column">
+			<div class="grid-wrap" class:applying>
+				{#if applying}
+					<div class="applying-overlay">
+						<span class="applying-spinner"></span>
+						{sort ? 'Sorting…' : 'Filtering…'}
+					</div>
+				{/if}
 				<table>
 					<thead>
 						<tr>
@@ -541,9 +774,9 @@ Bug,Free,12,false
 						</tr>
 					</thead>
 					<tbody>
-						{#each visibleRows as row, i (i)}
+						{#each pageRows as { row, index } (index)}
 							<tr>
-								<td class="row-num-col">{i + 1}</td>
+								<td class="row-num-col">{index + 1}</td>
 								{#each displayedTable.columns as col (col.name)}
 									<td
 										class:numeric={col.type === 'number'}
@@ -559,9 +792,25 @@ Bug,Free,12,false
 						{/each}
 					</tbody>
 				</table>
-				{#if visibleRows.length === 0}
+				{#if totalVisibleRows === 0}
 					<p class="no-rows">No rows match the current filters.</p>
 				{/if}
+			</div>
+
+			{#if totalVisibleRows > 0}
+				<div class="pagination">
+					<button type="button" disabled={currentPage === 0} onclick={() => currentPage--}>
+						Prev
+					</button>
+					<span>
+						{currentPage * PAGE_SIZE + 1}–{Math.min(totalVisibleRows, (currentPage + 1) * PAGE_SIZE)}
+						of {totalVisibleRows}
+					</span>
+					<button type="button" disabled={currentPage >= pageCount - 1} onclick={() => currentPage++}>
+						Next
+					</button>
+				</div>
+			{/if}
 			</div>
 
 			{#if inspected}
@@ -583,11 +832,15 @@ Bug,Free,12,false
 						</div>
 						<div class="stat">
 							<span class="stat-label">Min</span>
-							<span class="stat-value">{inspected.stats.min ?? ''}</span>
+							<span class="stat-value" title={String(inspected.stats.min ?? '')}
+								>{inspected.stats.min ?? ''}</span
+							>
 						</div>
 						<div class="stat">
 							<span class="stat-label">Max</span>
-							<span class="stat-value">{inspected.stats.max ?? ''}</span>
+							<span class="stat-value" title={String(inspected.stats.max ?? '')}
+								>{inspected.stats.max ?? ''}</span
+							>
 						</div>
 					</div>
 
@@ -607,12 +860,15 @@ Bug,Free,12,false
 
 		<footer class="status-bar">
 			<span>
-				{visibleRows.length} of {sourceTable?.rowCount} rows shown
+				{totalVisibleRows} of {sourceTable?.rowCount} rows shown
 				{#if filters.length > 0}
 					· {filters.length} filter{filters.length === 1 ? '' : 's'}
 				{/if}
 				{#if sort}
 					· sorted by {sort.column} {sort.direction === 'asc' ? '↑' : '↓'}
+				{/if}
+				{#if engineUsed === 'duckdb'}
+					· via DuckDB ({sourceTable?.rowCount.toLocaleString()} rows)
 				{/if}
 			</span>
 			<span class="privacy-note">Everything stays on your device.</span>
@@ -730,6 +986,116 @@ Bug,Free,12,false
 	}
 	.export-menu button:hover {
 		background: var(--panel-2);
+	}
+
+	/* COLUMN HEALTH STRIP */
+	.column-strip {
+		padding: 14px clamp(20px, 4.5vw, 40px);
+		border-bottom: var(--border-w) solid var(--ink);
+	}
+	.column-strip-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-bottom: 10px;
+	}
+	.strip-label {
+		font-size: 10.5px;
+		font-weight: 700;
+		letter-spacing: 0.6px;
+		text-transform: uppercase;
+		color: var(--ink-3);
+	}
+	.strip-flag {
+		font-family: var(--font-hand);
+		font-weight: 700;
+		font-size: 16px;
+		color: var(--lav-d);
+	}
+	.strip-cards {
+		display: flex;
+		gap: 12px;
+		overflow-x: auto;
+		padding-bottom: 2px;
+	}
+	.strip-card {
+		flex: none;
+		width: 148px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		text-align: left;
+		font: inherit;
+		background: var(--panel);
+		border: var(--border-w) solid var(--ink);
+		border-radius: 10px;
+		padding: 10px 12px;
+		cursor: pointer;
+	}
+	.strip-card.selected {
+		border-color: var(--terra);
+		box-shadow: var(--shadow-hard-sm);
+	}
+	.strip-card-head {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.strip-name-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: nowrap;
+		gap: 6px;
+		min-width: 0;
+	}
+	.strip-name-row .col-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-weight: 700;
+		margin-right: 0;
+	}
+	.strip-name-row .type-badge {
+		flex: none;
+	}
+	.strip-empty {
+		font-size: 10px;
+		font-weight: 700;
+		color: var(--terra-d);
+	}
+	.strip-bar-track {
+		height: 6px;
+		border-radius: 999px;
+		background: var(--hairline);
+		overflow: hidden;
+	}
+	.strip-bar-fill {
+		display: block;
+		height: 100%;
+		background: var(--lime);
+	}
+	.strip-bar-fill.warn {
+		background: var(--terra);
+	}
+	.strip-sparkline {
+		display: flex;
+		align-items: flex-end;
+		gap: 2px;
+		height: 20px;
+	}
+	.spark-bar {
+		flex: 1;
+		min-height: 2px;
+		background: var(--lav);
+		border-radius: 1px;
+	}
+	.strip-sub {
+		font-size: 11px;
+		color: var(--ink-3);
 	}
 
 	/* TOOLBAR */
@@ -886,6 +1252,18 @@ Bug,Free,12,false
 		justify-content: space-between;
 		font-size: 14px;
 		font-weight: 600;
+		margin-bottom: 16px;
+	}
+	.encoding-select {
+		width: 100%;
+		font: inherit;
+		font-size: 13px;
+		font-weight: 600;
+		border: var(--border-w) solid var(--ink);
+		border-radius: 8px;
+		padding: 7px 10px;
+		background: var(--panel-2);
+		color: var(--ink);
 	}
 
 	.empty-state {
@@ -985,6 +1363,10 @@ Bug,Free,12,false
 	.error {
 		color: var(--terra-d);
 		font-weight: 600;
+	}
+	.loading-note {
+		font-weight: 600;
+		color: var(--ink-2);
 	}
 	.drop-actions {
 		display: flex;
@@ -1117,12 +1499,91 @@ Bug,Free,12,false
 		display: flex;
 		min-height: 0;
 	}
-	.grid-wrap {
+	.grid-column {
 		flex: 1;
 		min-width: 0; /* without this a wide table forces the flex row to grow
 			instead of scrolling in place, pushing the inspector off the edge */
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+	}
+	.grid-wrap {
+		position: relative;
+		flex: 1;
 		overflow: auto;
 		padding: 0 clamp(20px, 4.5vw, 40px);
+	}
+	.grid-wrap.applying table {
+		opacity: 0.4;
+		pointer-events: none;
+	}
+	.applying-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+		font-weight: 600;
+		color: var(--ink-2);
+		background: color-mix(in srgb, var(--paper) 70%, transparent);
+	}
+	.applying-spinner {
+		width: 16px;
+		height: 16px;
+		border: 2.5px solid var(--ink-3);
+		border-top-color: var(--terra);
+		border-radius: 50%;
+		animation: spin 0.7s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	.error-banner {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px clamp(20px, 4.5vw, 40px);
+		background: var(--terra);
+		color: var(--ink-on-accent);
+		font-weight: 600;
+		font-size: 14px;
+	}
+	.error-banner button {
+		background: none;
+		border: none;
+		color: inherit;
+		font-weight: 700;
+		font-size: 16px;
+		cursor: pointer;
+	}
+	.pagination {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 16px;
+		padding: 12px;
+		border-top: 1px solid var(--hairline);
+		font-size: 13px;
+		color: var(--ink-2);
+	}
+	.pagination button {
+		font: inherit;
+		font-weight: 600;
+		border: var(--border-w) solid var(--ink);
+		border-radius: 8px;
+		padding: 5px 12px;
+		background: var(--panel-2);
+		color: var(--ink);
+		cursor: pointer;
+	}
+	.pagination button:disabled {
+		opacity: 0.4;
+		cursor: default;
 	}
 	.no-rows {
 		padding: 32px 0;
@@ -1130,9 +1591,7 @@ Bug,Free,12,false
 		color: var(--ink-2);
 	}
 	table {
-		width: 100%;
 		border-collapse: collapse;
-		table-layout: fixed;
 		font-size: 13.5px;
 	}
 	th,
@@ -1142,6 +1601,7 @@ Bug,Free,12,false
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		max-width: 260px;
 	}
 	thead th {
 		border-bottom: var(--border-w) solid var(--ink);
@@ -1240,11 +1700,20 @@ Bug,Free,12,false
 	}
 	.stat-grid {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		/* plain 1fr implies min-width: auto — a column won't shrink below its
+		   content's intrinsic width, so one long unbreakable value (e.g. a
+		   text column's max is the word "CONFIDENTIAL") forces the whole
+		   grid wider than the inspector and it spills out — confirmed by
+		   measurement: the second column's box extended ~170px past the
+		   inspector's own right edge. minmax(0, 1fr) is the fix; the value
+		   itself still needs truncation below, or the same overflow just
+		   moves one level down. */
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		gap: 14px;
 		margin-bottom: 20px;
 	}
 	.stat {
+		min-width: 0;
 		background: var(--panel-2);
 		border: var(--border-w) solid var(--ink);
 		border-radius: 10px;
@@ -1263,6 +1732,9 @@ Bug,Free,12,false
 		font-family: var(--font-serif);
 		font-weight: 700;
 		font-size: 21px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.histogram {
 		display: flex;

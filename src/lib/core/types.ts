@@ -18,8 +18,12 @@ export interface Table {
   readonly rowCount: number;
   /** Read one column's values in row order. Throws on an unknown column name. */
   getColumn(name: string): ReadonlyArray<unknown>;
-  /** Materialize every row as a plain object, for the grid, export, and tests. */
+  /** Materialize every row as a plain object, for export and tests. A
+   * virtualized grid should prefer getRows(start, end) instead — this
+   * pays the full table's cost regardless of how much is on screen. */
   toRows(): ReadonlyArray<Record<string, unknown>>;
+  /** Materialize only rows [start, end), for a virtualized grid's visible window. */
+  getRows(start: number, end: number): ReadonlyArray<Record<string, unknown>>;
 }
 
 /** Serializable params: a plain JSON object fully describing one operation instance. */

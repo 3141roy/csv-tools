@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fromRows } from './table';
+import { fromRows, fromIPC } from './table';
 
 describe('Table.fromRows', () => {
 	const rows = [
@@ -37,5 +37,18 @@ describe('Table.fromRows', () => {
 		expect(empty.rowCount).toBe(0);
 		expect(empty.columns).toEqual([]);
 		expect(empty.toRows()).toEqual([]);
+	});
+
+	it('materializes only a row window with getRows', () => {
+		const table = fromRows(rows);
+		expect(table.getRows(1, 2)).toEqual([{ name: 'Grace', signups: 3980, active: false }]);
+		expect(table.getRows(0, 100)).toEqual(table.toRows());
+	});
+
+	it('round-trips through toIPC/fromIPC — how a Table crosses a worker boundary', () => {
+		const table = fromRows(rows);
+		const reconstructed = fromIPC(table.toIPC());
+		expect(reconstructed.columns).toEqual(table.columns);
+		expect(reconstructed.toRows()).toEqual(table.toRows());
 	});
 });

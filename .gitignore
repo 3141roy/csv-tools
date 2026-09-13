@@ -2,6 +2,10 @@
 node_modules/
 .pnpm-store/
 
+# DuckDB engine paused pending more testing, not committed while
+# unproven (routing disabled in select-engine.ts either way)
+src/lib/engine/duckdb/
+
 # build output
 .svelte-kit/
 build/

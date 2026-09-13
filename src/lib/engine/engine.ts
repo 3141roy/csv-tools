@@ -1,8 +1,10 @@
-// The engine adapter interface. Not wired up yet.
-import type { Table } from '../core/types';
+// The engine adapter interface. Operations/UI depend on this, never on a
+// concrete engine by name — see select-engine.ts, which picks an
+// implementation by table size.
+import type { OperationInvocation } from '../core/types';
+import type { Table } from '../core/table';
 
 export interface Engine {
-  readonly name: string; // 'light' | 'arquero' | 'sqljs' | 'duckdb'
-  sort(table: Table, column: string, dir: 'asc' | 'desc'): Promise<Table>;
-  // filter, aggregate, join, and an optional sql(query) surface for SQL-capable engines.
+	readonly name: 'arquero' | 'duckdb';
+	applyLog(table: Table, log: ReadonlyArray<OperationInvocation>): Promise<Table>;
 }

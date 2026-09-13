@@ -5,7 +5,7 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
 	preprocess: vitePreprocess(),
 	kit: {
-		// Pure static output, no server runtime — required by the privacy promise (ADR-0002).
+		// Pure static output, no server runtime — required by the privacy promise.
 		adapter: adapter({
 			fallback: '200.html' // SPA fallback for client-side routing
 		})
