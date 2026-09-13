@@ -49,6 +49,11 @@
   --shadow-hard-lg: 6px 6px 0 var(--ink);
   --shadow-press: 3px 3px 0 var(--ink);
   --shadow-press-sm: 2px 2px 0 var(--ink);
+
+  /* Data grid row rule: quiet even in light mode (10% ink), so it must be
+     redefined in dark mode too, not just inherit --ink like the borders
+     above, since 10% of light-mode ink is nearly invisible on a dark row. */
+  --hairline: rgba(23, 21, 15, 0.1);
 }
 
 /*
@@ -92,4 +97,5 @@
   --shadow-hard-lg: none;
   --shadow-press: none;
   --shadow-press-sm: none;
+  --hairline: rgba(240, 234, 217, 0.14);
 }

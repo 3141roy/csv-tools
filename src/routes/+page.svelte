@@ -33,7 +33,7 @@
 			<a class="pill" href="https://bundle.tools">part of Bundle</a>
 		</div>
 		<div class="nav-links">
-			<span class="nav-link-text">Open a file</span>
+			<a class="nav-link-text" href="/editor">Open a file</a>
 			<span class="nav-link-text">Convert</span>
 			<span class="nav-link-text">How it works</span>
 			<a class="gh-btn" href="https://github.com/3141roy/csv-tools">
@@ -107,7 +107,7 @@
 			</div>
 
 			<div class="ctas">
-				<div class="btn btn-primary">
+				<a class="btn btn-primary" href="/editor">
 					Drop a CSV to start
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
 						<path
@@ -118,8 +118,8 @@
 							stroke-linejoin="round"
 						/>
 					</svg>
-				</div>
-				<div class="btn btn-secondary">Try sample data</div>
+				</a>
+				<a class="btn btn-secondary" href="/editor?sample=1">Try sample data</a>
 				<div class="hand-note">
 					<svg width="34" height="30" viewBox="0 0 34 30" fill="none" class="hand-arrow">
 						<path d="M30 27C20 15 12 6 6 3" stroke="var(--terra-d)" stroke-width="2.4" fill="none" stroke-linecap="round" />
@@ -296,6 +296,12 @@
 		font-weight: 500;
 		color: var(--ink-2);
 		flex-wrap: wrap;
+	}
+	.nav-link-text {
+		color: inherit;
+	}
+	.nav-link-text:hover {
+		color: var(--ink);
 	}
 	.gh-btn {
 		display: flex;
