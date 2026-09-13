@@ -7,6 +7,7 @@
  */
 :root {
   /* ground & ink */
+  --desk: #E8E3D4;   /* canvas behind the framed page on wide screens, a shade off paper */
   --paper: #F3EFE2;
   --panel: #FBF8EF;
   --panel-2: #FCFBF4;
@@ -14,9 +15,17 @@
   --ink-2: #5C5647;
   --ink-3: #8A8470;
 
-  /* geometric accents */
+  /* Fixed, does not flip with theme. The pastel accent fills below (sky,
+     lav, lime, terra) stay the same light colors in both themes, so text
+     or icon strokes drawn directly on top of them must stay dark too, or
+     contrast collapses the moment --ink turns light for dark mode. Use
+     this instead of --ink for a label/icon sitting on an accent fill;
+     keep --ink for borders, which sit against the page background instead. */
+  --ink-on-accent: #17150F;
+
+  /* geometric accents: same light pastel in both themes (see --ink-on-accent above) */
   --sky: #A6DCEF;
-  --sky-d: #2E97CF;
+  --sky-d: #2E97CF;   /* sky used as text/link color: darkens for AA on light, lightens on dark */
   --lav: #C6B7F2;
   --lav-d: #7C63D6;
   --lime: #CBE85C;
@@ -30,12 +39,57 @@
   --font-hand: "Caveat", "Comic Sans MS", cursive;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* surfaces: thick outlines with hard offset shadows */
+  /* surfaces: thick ink outlines. Elevation (page frame, cards) reads
+     through a hard offset shadow in light mode; see the dark override
+     below for why that flips to a lightened surface instead. */
   --border-w: 2.5px;
   --radius: 12px;
   --shadow-hard: 5px 5px 0 var(--ink);
   --shadow-hard-sm: 3px 3px 0 var(--ink);
+  --shadow-hard-lg: 6px 6px 0 var(--ink);
+  --shadow-press: 3px 3px 0 var(--ink);
+  --shadow-press-sm: 2px 2px 0 var(--ink);
 }
 
-/* Dark theme, not tuned yet. */
-/* :root[data-theme="dark"] { --paper: #1A1712; --panel: #221E17; --ink: #F4F0E4; ... } */
+/*
+ * Dark theme. Values are chosen per-token, not inverted from light:
+ *
+ * - Surfaces (desk/paper/panel/panel-2) are one base dark color
+ *   (#14120d) with increasing white-overlay opacity (5%/7%/9%), the
+ *   Material dark-theme elevation technique: an element reads as "higher"
+ *   by getting lighter, not by casting a shadow. A solid offset shadow
+ *   in the light-mode color (near-black) is invisible on a dark surface,
+ *   and in the light-mode shape (bright ink) reads as a glow, not a
+ *   shadow, so --shadow-hard* collapse to `none` here and depth comes
+ *   from the surface ramp instead.
+ * - ink / ink-2 / ink-3 are lightened, not just swapped for their light
+ *   value, and independently checked at 4.5:1 (ink-3, the tightest
+ *   case, against the lightest surface, panel-2: 4.94:1).
+ * - The sky/lav/lime/terra "-d" text variants are re-picked for contrast
+ *   against dark surfaces (6.3-9.9:1), not reused from light mode, where
+ *   they were tuned for contrast against paper instead.
+ * - --ink-on-accent is intentionally absent here: it must stay dark in
+ *   both themes, since the accent fills it sits on don't change.
+ *
+ * Light is the default; dark only applies when explicitly chosen via
+ * `data-theme="dark"` on the root element (see the toggle in
+ * +page.svelte). Not tied to system preference.
+ */
+:root[data-theme='dark'] {
+  --desk: #14120d;
+  --paper: #201e19;
+  --panel: #24231e;
+  --panel-2: #292723;
+  --ink: #ede6d6;
+  --ink-2: #b5ac98;
+  --ink-3: #9c9688;
+  --sky-d: #6cc3ea;
+  --lav-d: #b39df0;
+  --lime-d: #a9c93e;
+  --terra-d: #f0916a;
+  --shadow-hard: none;
+  --shadow-hard-sm: none;
+  --shadow-hard-lg: none;
+  --shadow-press: none;
+  --shadow-press-sm: none;
+}

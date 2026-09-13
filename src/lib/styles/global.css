@@ -5,12 +5,23 @@
 	box-sizing: border-box;
 }
 
+:root {
+	color-scheme: light;
+}
+
 body {
 	margin: 0;
 	font-family: var(--font-sans);
 	color: var(--ink);
-	background: var(--paper);
+	background: var(--desk);
 	-webkit-font-smoothing: antialiased;
+	padding: 2.5rem 1.5rem;
+}
+
+@media (max-width: 640px) {
+	body {
+		padding: 0;
+	}
 }
 
 a {

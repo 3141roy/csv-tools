@@ -1,3 +1,26 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+
+	// Lives here because this is the only route so far. Once the editor and
+	// convert routes exist, move this to +layout.svelte so the toggle and
+	// the stored preference are shared across the whole app.
+	let theme = $state<'light' | 'dark'>('light');
+
+	onMount(() => {
+		const stored = localStorage.getItem('theme');
+		theme = stored === 'dark' ? 'dark' : 'light';
+	});
+
+	$effect(() => {
+		document.documentElement.dataset.theme = theme;
+	});
+
+	function toggleTheme() {
+		theme = theme === 'dark' ? 'light' : 'dark';
+		localStorage.setItem('theme', theme);
+	}
+</script>
+
 <svelte:head>
 	<title>csv.bundle.tools: Any CSV, made legible</title>
 </svelte:head>
@@ -10,17 +33,45 @@
 			<a class="pill" href="https://bundle.tools">part of Bundle</a>
 		</div>
 		<div class="nav-links">
-			<span>Open a file</span>
-			<span>Convert</span>
-			<span>How it works</span>
+			<span class="nav-link-text">Open a file</span>
+			<span class="nav-link-text">Convert</span>
+			<span class="nav-link-text">How it works</span>
 			<a class="gh-btn" href="https://github.com/3141roy/csv-tools">
 				<svg width="16" height="16" viewBox="0 0 16 16" fill="var(--ink)">
 					<path
 						d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"
 					/>
 				</svg>
-				GitHub
+				<span class="gh-label">GitHub</span>
 			</a>
+			<button
+				type="button"
+				class="theme-toggle"
+				onclick={toggleTheme}
+				aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+			>
+				{#if theme === 'dark'}
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+						<circle cx="12" cy="12" r="4.5" stroke="var(--ink)" stroke-width="2.2" />
+						<path
+							d="M12 2.5v2.5M12 19v2.5M21.5 12H19M5 12H2.5M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4 5.6 5.6"
+							stroke="var(--ink)"
+							stroke-width="2.2"
+							stroke-linecap="round"
+						/>
+					</svg>
+				{:else}
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"
+							fill="var(--lav)"
+							stroke="var(--ink)"
+							stroke-width="2.2"
+							stroke-linejoin="round"
+						/>
+					</svg>
+				{/if}
+			</button>
 		</div>
 	</nav>
 
@@ -29,8 +80,8 @@
 		<div class="hero-left">
 			<div class="kicker">
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-					<rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="var(--ink)" stroke-width="2.4" />
-					<path d="M8 10V8a4 4 0 0 1 8 0v2" fill="none" stroke="var(--ink)" stroke-width="2.4" />
+					<rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="var(--ink-on-accent)" stroke-width="2.4" />
+					<path d="M8 10V8a4 4 0 0 1 8 0v2" fill="none" stroke="var(--ink-on-accent)" stroke-width="2.4" />
 				</svg>
 				STAYS ON YOUR DEVICE
 			</div>
@@ -47,7 +98,7 @@
 			<div class="callout">
 				<svg width="20" height="20" viewBox="0 0 24 24" fill="none" class="callout-icon">
 					<circle cx="12" cy="12" r="9.5" fill="var(--sky)" stroke="var(--ink)" stroke-width="2.2" />
-					<path d="M12 7.6v.2M12 11v6" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round" />
+					<path d="M12 7.6v.2M12 11v6" stroke="var(--ink-on-accent)" stroke-width="2.4" stroke-linecap="round" />
 				</svg>
 				<div>
 					Built for <b>quick overviews and light clean-up</b>, not heavy analytics. Nothing uploads,
@@ -61,7 +112,7 @@
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
 						<path
 							d="M4 12h15M13 6l6 6-6 6"
-							stroke="var(--ink)"
+							stroke="var(--ink-on-accent)"
 							stroke-width="2.6"
 							stroke-linecap="round"
 							stroke-linejoin="round"
@@ -90,36 +141,36 @@
 				<defs>
 					<pattern id="hatch" width="11" height="11" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
 						<rect width="11" height="11" fill="var(--lav)" />
-						<line x1="0" y1="0" x2="0" y2="11" stroke="var(--ink)" stroke-width="3.2" />
+						<line x1="0" y1="0" x2="0" y2="11" stroke="var(--ink-on-accent)" stroke-width="3.2" />
 					</pattern>
 				</defs>
 
 				<g class="shape shape-square">
-					<rect x="352" y="24" width="46" height="46" rx="12" fill="var(--terra)" stroke="var(--ink)" stroke-width="2.6" />
+					<rect x="352" y="24" width="46" height="46" rx="12" fill="var(--terra)" stroke="var(--ink-on-accent)" stroke-width="2.6" />
 				</g>
 
 				<g class="shape shape-grid">
-					<rect x="46" y="8" width="300" height="184" rx="16" fill="var(--sky)" stroke="var(--ink)" stroke-width="3.4" />
-					<rect x="46" y="8" width="100" height="61" fill="var(--lime)" stroke="var(--ink)" stroke-width="2" />
-					<rect x="246" y="131" width="100" height="61" fill="var(--panel)" stroke="var(--ink)" stroke-width="2" />
-					<line x1="146" y1="8" x2="146" y2="192" stroke="var(--ink)" stroke-width="2.2" />
-					<line x1="246" y1="8" x2="246" y2="192" stroke="var(--ink)" stroke-width="2.2" />
-					<line x1="46" y1="69" x2="346" y2="69" stroke="var(--ink)" stroke-width="2.2" />
-					<line x1="46" y1="131" x2="346" y2="131" stroke="var(--ink)" stroke-width="2.2" />
+					<rect x="46" y="8" width="300" height="184" rx="16" fill="var(--sky)" stroke="var(--ink-on-accent)" stroke-width="3.4" />
+					<rect x="46" y="8" width="100" height="61" fill="var(--lime)" stroke="var(--ink-on-accent)" stroke-width="2" />
+					<rect x="246" y="131" width="100" height="61" fill="var(--panel)" stroke="var(--ink-on-accent)" stroke-width="2" />
+					<line x1="146" y1="8" x2="146" y2="192" stroke="var(--ink-on-accent)" stroke-width="2.2" />
+					<line x1="246" y1="8" x2="246" y2="192" stroke="var(--ink-on-accent)" stroke-width="2.2" />
+					<line x1="46" y1="69" x2="346" y2="69" stroke="var(--ink-on-accent)" stroke-width="2.2" />
+					<line x1="46" y1="131" x2="346" y2="131" stroke="var(--ink-on-accent)" stroke-width="2.2" />
 				</g>
 
 				<g class="shape shape-band">
-					<rect x="70" y="248" width="346" height="66" rx="6" fill="url(#hatch)" stroke="var(--ink)" stroke-width="3.4" />
-					<rect x="224" y="274" width="38" height="14" rx="3" fill="var(--panel)" stroke="var(--ink)" stroke-width="2.4" />
+					<rect x="70" y="248" width="346" height="66" rx="6" fill="url(#hatch)" stroke="var(--ink-on-accent)" stroke-width="3.4" />
+					<rect x="224" y="274" width="38" height="14" rx="3" fill="var(--panel)" stroke="var(--ink-on-accent)" stroke-width="2.4" />
 				</g>
 
 				<g class="shape shape-donut">
-					<circle cx="165" cy="392" r="80" fill="var(--sky)" stroke="var(--ink)" stroke-width="3.4" />
-					<circle cx="165" cy="392" r="27" fill="var(--paper)" stroke="var(--ink)" stroke-width="3.4" />
+					<circle cx="165" cy="392" r="80" fill="var(--sky)" stroke="var(--ink-on-accent)" stroke-width="3.4" />
+					<circle cx="165" cy="392" r="27" fill="var(--paper)" stroke="var(--ink-on-accent)" stroke-width="3.4" />
 				</g>
 
 				<g class="shape shape-chevron">
-					<path d="M255 452h190l-95 66z" fill="var(--lime)" stroke="var(--ink)" stroke-width="3.4" stroke-linejoin="round" />
+					<path d="M255 452h190l-95 66z" fill="var(--lime)" stroke="var(--ink-on-accent)" stroke-width="3.4" stroke-linejoin="round" />
 				</g>
 			</svg>
 		</div>
@@ -135,9 +186,9 @@
 				<div class="card-top">
 					<div class="card-icon sky">
 						<svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-							<rect x="3" y="4" width="18" height="16" rx="2" stroke="var(--ink)" stroke-width="2.2" />
-							<line x1="3" y1="10" x2="21" y2="10" stroke="var(--ink)" stroke-width="2.2" />
-							<line x1="9" y1="10" x2="9" y2="20" stroke="var(--ink)" stroke-width="2.2" />
+							<rect x="3" y="4" width="18" height="16" rx="2" stroke="var(--ink-on-accent)" stroke-width="2.2" />
+							<line x1="3" y1="10" x2="21" y2="10" stroke="var(--ink-on-accent)" stroke-width="2.2" />
+							<line x1="9" y1="10" x2="9" y2="20" stroke="var(--ink-on-accent)" stroke-width="2.2" />
 						</svg>
 					</div>
 					<span class="card-num">1</span>
@@ -150,7 +201,7 @@
 				<div class="card-top">
 					<div class="card-icon lime">
 						<svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-							<path d="M4 20l4-1L19 8a2.1 2.1 0 0 0-3-3L5 16l-1 4z" stroke="var(--ink)" stroke-width="2.2" stroke-linejoin="round" />
+							<path d="M4 20l4-1L19 8a2.1 2.1 0 0 0-3-3L5 16l-1 4z" stroke="var(--ink-on-accent)" stroke-width="2.2" stroke-linejoin="round" />
 						</svg>
 					</div>
 					<span class="card-num">2</span>
@@ -165,7 +216,7 @@
 						<svg width="24" height="24" viewBox="0 0 24 24" fill="none">
 							<path
 								d="M7 8l-4 4 4 4M17 8l4 4-4 4M14 4l-4 16"
-								stroke="var(--ink)"
+								stroke="var(--ink-on-accent)"
 								stroke-width="2.2"
 								stroke-linecap="round"
 								stroke-linejoin="round"
@@ -191,6 +242,18 @@
 	.page {
 		max-width: 1440px;
 		margin: 0 auto;
+		background: var(--paper);
+		border: 2px solid var(--ink);
+		border-radius: 20px;
+		box-shadow: var(--shadow-hard-lg);
+		overflow: hidden;
+	}
+	@media (max-width: 640px) {
+		.page {
+			border: none;
+			border-radius: 0;
+			box-shadow: none;
+		}
 	}
 
 	/* NAV */
@@ -246,6 +309,24 @@
 		box-shadow: var(--shadow-hard-sm);
 		background: var(--panel-2);
 	}
+	.theme-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		flex: none;
+		border: var(--border-w) solid var(--ink);
+		border-radius: 10px;
+		box-shadow: var(--shadow-hard-sm);
+		background: var(--panel-2);
+		cursor: pointer;
+		transition: transform 0.08s ease, box-shadow 0.08s ease;
+	}
+	.theme-toggle:hover {
+		transform: translate(1px, 1px);
+		box-shadow: var(--shadow-press-sm);
+	}
 
 	/* HERO */
 	.hero {
@@ -267,7 +348,7 @@
 		font-size: 12px;
 		font-weight: 600;
 		letter-spacing: 1.5px;
-		color: var(--ink);
+		color: var(--ink-on-accent);
 		background: var(--lime);
 		border: var(--border-w) solid var(--ink);
 		border-radius: 999px;
@@ -339,10 +420,11 @@
 	}
 	.btn:hover {
 		transform: translate(2px, 2px);
-		box-shadow: 3px 3px 0 var(--ink);
+		box-shadow: var(--shadow-press);
 	}
 	.btn-primary {
 		background: var(--terra);
+		color: var(--ink-on-accent);
 	}
 	.btn-secondary {
 		background: var(--panel-2);
@@ -497,7 +579,7 @@
 		background: var(--panel);
 		border: var(--border-w) solid var(--ink);
 		border-radius: 16px;
-		box-shadow: 6px 6px 0 var(--ink);
+		box-shadow: var(--shadow-hard-lg);
 		padding: 22px;
 		display: flex;
 		flex-direction: column;
@@ -561,12 +643,38 @@
 		color: var(--ink);
 	}
 
-	@media (max-width: 900px) {
+	/* Below this the totem has nowhere good to sit: too narrow to read as a
+	   composition, but not narrow enough to justify going full width, so it
+	   just leaves blank space under itself. Drop it and let the text column
+	   be the whole hero, centered so it reads as a deliberate single column
+	   rather than a two-column layout with an empty half. */
+	@media (max-width: 1180px) {
 		.hero {
 			grid-template-columns: 1fr;
 		}
 		.hero-right {
-			order: -1;
+			display: none;
+		}
+		.hero-left {
+			max-width: 640px;
+			margin: 0 auto;
+		}
+	}
+
+	/* Below this there's no room for nav text links plus a labeled GitHub
+	   button, so the nav compresses: links go first, then the button
+	   drops to icon-only. */
+	@media (max-width: 800px) {
+		.nav-link-text {
+			display: none;
+		}
+		.hand-note {
+			display: none;
+		}
+	}
+	@media (max-width: 640px) {
+		.gh-label {
+			display: none;
 		}
 	}
 </style>
