@@ -134,6 +134,7 @@ Bug,Free,12,false
 		sort = null;
 		searchQuery = '';
 		selectedColumn = null;
+		columnWidths = {};
 		parseBytes(buffer);
 	}
 
@@ -215,6 +216,62 @@ Bug,Free,12,false
 
 	function selectColumn(name: string) {
 		selectedColumn = selectedColumn === name ? null : name;
+	}
+
+	// Column widths: pure view state, not table data — same category as
+	// selectedColumn/currentPage, so it lives here rather than going
+	// through the operation registry (that's for mutations to the data).
+	const DEFAULT_COL_WIDTH = 160;
+	const MIN_COL_WIDTH = 60;
+	const MAX_COL_WIDTH = 480;
+	let columnWidths = $state<Record<string, number>>({});
+
+	function columnWidth(name: string): number {
+		return columnWidths[name] ?? DEFAULT_COL_WIDTH;
+	}
+
+	let resizing: { name: string; startX: number; startWidth: number } | null = null;
+
+	function startResize(e: PointerEvent, name: string) {
+		e.stopPropagation(); // don't also trigger selectColumn on the header
+		e.preventDefault();
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		resizing = { name, startX: e.clientX, startWidth: columnWidth(name) };
+	}
+
+	function onResizeMove(e: PointerEvent) {
+		if (!resizing) return;
+		const width = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, resizing.startWidth + (e.clientX - resizing.startX)));
+		columnWidths = { ...columnWidths, [resizing.name]: width };
+	}
+
+	function endResize() {
+		resizing = null;
+	}
+
+	let measureCtx: CanvasRenderingContext2D | null = null;
+	function measureTextWidth(text: string, font: string): number {
+		if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+		measureCtx!.font = font;
+		return measureCtx!.measureText(text).width;
+	}
+
+	// Fits a column to its header label plus every value currently on the
+	// visible page — like the rest of the grid, this never materializes
+	// the whole table just to measure text.
+	function autoFitColumn(col: { name: string; type: string }) {
+		const headerEl = document.querySelector<HTMLElement>(`th[data-col="${CSS.escape(col.name)}"] .th-content`);
+		const cellEl = document.querySelector<HTMLElement>(`td[data-col="${CSS.escape(col.name)}"]`);
+		const headerFont = headerEl ? getComputedStyle(headerEl).font : '600 13.5px sans-serif';
+		const cellFont = cellEl ? getComputedStyle(cellEl).font : '400 13.5px sans-serif';
+
+		let max = measureTextWidth(`${col.name} ${typeBadge(col.type)}`, headerFont) + 40; // + sort button/gap
+		for (const { row } of pageRows) {
+			const value = row[col.name];
+			const text = value === null || value === undefined ? '' : String(value);
+			max = Math.max(max, measureTextWidth(text, cellFont));
+		}
+		columnWidths = { ...columnWidths, [col.name]: Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, Math.round(max + 24))) };
 	}
 
 	// Double-click a cell to edit it. Identified by the hidden row-id (not
@@ -436,6 +493,16 @@ Bug,Free,12,false
 			: (displayedTable?.getRows(start, end) ?? []);
 		return rows.map((row, i) => ({ row, index: start + i }));
 	});
+
+	// table-layout: fixed only actually clips a cell's unbreakable content
+	// to its <col> width when the <table> itself has an explicit width —
+	// left at auto, browsers grow the table (confirmed directly: measured
+	// 426px vs a declared 160px column) to fit the content anyway. Row-num
+	// col is a fixed 44px (see .row-num-col).
+	const ROW_NUM_COL_WIDTH = 44;
+	const totalTableWidth = $derived(
+		ROW_NUM_COL_WIDTH + (displayedTable?.columns.reduce((sum, c) => sum + columnWidth(c.name), 0) ?? 0)
+	);
 
 	// --- Format popover ---
 	let formatOpen = $state(false);
@@ -831,12 +898,22 @@ Bug,Free,12,false
 						{sort ? 'Sorting…' : 'Filtering…'}
 					</div>
 				{/if}
-				<table>
+				<table style="width: {totalTableWidth}px">
+					<colgroup>
+						<col class="row-num-col" />
+						{#each displayedTable.columns as col (col.name)}
+							<col style="width: {columnWidth(col.name)}px" />
+						{/each}
+					</colgroup>
 					<thead>
 						<tr>
 							<th class="row-num-col"></th>
 							{#each displayedTable.columns as col (col.name)}
-								<th class:selected-col={selectedColumn === col.name} class:sorted-col={sort?.column === col.name}>
+								<th
+									data-col={col.name}
+									class:selected-col={selectedColumn === col.name}
+									class:sorted-col={sort?.column === col.name}
+								>
 									<button type="button" class="th-content" onclick={() => selectColumn(col.name)}>
 										<span class="col-name">{col.name}</span>
 										<span class="type-badge">{typeBadge(col.type)}</span>
@@ -852,6 +929,19 @@ Bug,Free,12,false
 									>
 										{sort?.column === col.name ? (sort.direction === 'asc' ? '↑' : '↓') : '↕'}
 									</button>
+									<div
+										class="col-resize"
+										onpointerdown={(e) => startResize(e, col.name)}
+										onpointermove={onResizeMove}
+										onpointerup={endResize}
+										ondblclick={(e) => {
+											e.stopPropagation();
+											autoFitColumn(col);
+										}}
+										role="separator"
+										aria-orientation="vertical"
+										aria-label="Resize {col.name} column"
+									></div>
 								</th>
 							{/each}
 						</tr>
@@ -864,6 +954,7 @@ Bug,Free,12,false
 									{@const isEditing =
 										editingCell?.rowId === row[ROW_ID_COLUMN] && editingCell?.column === col.name}
 									<td
+										data-col={col.name}
 										class:numeric={col.type === 'number'}
 										class:selected-col={selectedColumn === col.name}
 										class:sorted-col={sort?.column === col.name}
@@ -1693,6 +1784,7 @@ Bug,Free,12,false
 	}
 	table {
 		border-collapse: collapse;
+		table-layout: fixed;
 		font-size: 13.5px;
 	}
 	th,
@@ -1702,15 +1794,34 @@ Bug,Free,12,false
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		max-width: 260px;
 	}
 	thead th {
-		border-bottom: var(--border-w) solid var(--ink);
-		background: var(--paper);
+		/* sticky also establishes the positioning context .col-resize needs */
 		position: sticky;
 		top: 0;
+		border-bottom: var(--border-w) solid var(--ink);
+		background: var(--paper);
 		font-weight: 600;
 		white-space: nowrap;
+	}
+	.col-resize {
+		/* stays inside the th's own box: th has overflow:hidden for ellipsis
+		   truncation, which also clips (and kills hit-testing on) anything
+		   positioned outside it — a negative offset here is invisible AND
+		   unclickable, confirmed directly via elementFromPoint. */
+		position: absolute;
+		top: 0;
+		right: 0;
+		width: 8px;
+		height: 100%;
+		cursor: col-resize;
+		touch-action: none;
+		z-index: 1;
+	}
+	.col-resize:hover,
+	.col-resize:active {
+		background: var(--sky-d);
+		opacity: 0.5;
 	}
 	thead th.selected-col {
 		background: var(--sky);
