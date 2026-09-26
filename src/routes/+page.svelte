@@ -36,8 +36,8 @@
 		</div>
 		<div class="nav-links">
 			<a class="nav-link-text" href="/editor">Open a file</a>
-			<span class="nav-link-text">Convert</span>
-			<span class="nav-link-text">How it works</span>
+			<a class="nav-link-text" href="#convert">Convert</a>
+			<a class="nav-link-text" href="#how-it-works">How it works</a>
 			<a class="gh-btn" href="https://github.com/3141roy/csv-tools">
 				<svg width="16" height="16" viewBox="0 0 16 16" fill="var(--ink)">
 					<path
@@ -152,7 +152,7 @@
 	</section>
 
 	<!-- THREE THINGS -->
-	<section class="three-things">
+	<section class="three-things" id="how-it-works">
 		<div class="section-head">
 			<h2>Three things it does</h2>
 		</div>
@@ -207,7 +207,7 @@
 	</section>
 
 	<!-- PREVIEW -->
-	<section class="preview-section">
+	<section class="preview-section" id="convert">
 		<div class="section-head">
 			<h2>One clean table. That's the app.</h2>
 		</div>
