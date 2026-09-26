@@ -1,15 +1,34 @@
-// Hands the currently-loaded, currently-filtered/sorted table off to another
-// route (Convert) without re-parsing the file. The editor owns parsing and
-// the whole worker pipeline; this is just the latest read-only snapshot of
-// its output, mirrored here on every change (see the editor's `$effect`
-// that assigns into it). Module-level runes state, so it survives client-side
-// navigation between routes the way a page-local `$state` wouldn't.
+// The editor's loaded-file state, lifted out of the route component so it
+// survives navigating to Convert and back instead of resetting on remount.
 import type { Table } from '$lib/core/table';
+import type { CsvParseOptions } from '$lib/formats/csv/parse';
+import type { FilterRowsParams } from '$lib/operations/filter-rows/manifest';
 
-let table = $state.raw<Table | null>(null);
+export type FilterPill = { id: number; params: FilterRowsParams };
+export type SortState = { column: string; direction: 'asc' | 'desc' } | null;
+
+let rawBytes = $state<ArrayBuffer | null>(null);
+let sourceTable = $state.raw<Table | null>(null);
+let table = $state.raw<Table | null>(null); // displayed (filtered/sorted) table
 let fileName = $state('');
+let parseOptions = $state<CsvParseOptions>({ hasHeader: true });
+let encoding = $state('utf-8');
+let filters = $state<FilterPill[]>([]);
+let sort = $state<SortState>(null);
 
 export const sharedDocument = {
+	get rawBytes() {
+		return rawBytes;
+	},
+	set rawBytes(value: ArrayBuffer | null) {
+		rawBytes = value;
+	},
+	get sourceTable() {
+		return sourceTable;
+	},
+	set sourceTable(value: Table | null) {
+		sourceTable = value;
+	},
 	get table() {
 		return table;
 	},
@@ -21,5 +40,29 @@ export const sharedDocument = {
 	},
 	set fileName(value: string) {
 		fileName = value;
+	},
+	get parseOptions() {
+		return parseOptions;
+	},
+	set parseOptions(value: CsvParseOptions) {
+		parseOptions = value;
+	},
+	get encoding() {
+		return encoding;
+	},
+	set encoding(value: string) {
+		encoding = value;
+	},
+	get filters() {
+		return filters;
+	},
+	set filters(value: FilterPill[]) {
+		filters = value;
+	},
+	get sort() {
+		return sort;
+	},
+	set sort(value: SortState) {
+		sort = value;
 	}
 };

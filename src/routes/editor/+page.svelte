@@ -19,24 +19,13 @@ Alan,Team,1560,true
 Bug,Free,12,false
 `;
 
-	// Original bytes, kept so the Format popover can re-parse (a different
-	// delimiter, header toggle, or encoding) without re-reading the file.
-	let rawBytes: ArrayBuffer | null = null;
-	// $state.raw, not $state — a plain $state deep-proxies the value, and
-	// wrapping an apache-arrow Table in a reactive Proxy corrupts its
-	// internals (confirmed: Table.getRows -> arrowTable.slice() threw
-	// "Cannot read properties of undefined" only once a table reached this
-	// state; the same slice on an unwrapped table works fine). raw is
-	// correct anyway since the whole reference is always replaced, never
-	// mutated in place.
-	let sourceTable = $state.raw<Table | null>(null);
-	let fileName = $state('');
+	// Loaded-file state (rawBytes, sourceTable, fileName, parseOptions,
+	// encoding) lives in sharedDocument, not here — see that module's
+	// comment: it needs to survive navigating to Convert and back.
 	let error = $state<string | null>(null);
 	let dragging = $state(false);
 	let loading = $state(false);
 	let fileInput: HTMLInputElement | undefined = $state();
-	let parseOptions = $state<CsvParseOptions>({ hasHeader: true });
-	let encoding = $state('utf-8');
 
 	// Both parsing and applying the filter/sort log run in a worker
 	// (csv.worker.ts), never the main thread — real CPU + allocation work
@@ -67,8 +56,8 @@ Bug,Free,12,false
 						error = res.error;
 						return;
 					}
-					sourceTable = fromIPC(res.ipc);
-					parseOptions = { ...parseOptions, delimiter: res.delimiter };
+					sharedDocument.sourceTable = fromIPC(res.ipc);
+					sharedDocument.parseOptions = { ...sharedDocument.parseOptions, delimiter: res.delimiter };
 					error = null;
 				} else if (res.type === 'editCell') {
 					const pending = pendingEdits.get(res.requestId);
@@ -119,18 +108,18 @@ Bug,Free,12,false
 			type: 'parse',
 			requestId,
 			buffer,
-			encoding,
-			delimiter: parseOptions.delimiter,
-			hasHeader: parseOptions.hasHeader
+			encoding: sharedDocument.encoding,
+			delimiter: sharedDocument.parseOptions.delimiter,
+			hasHeader: sharedDocument.parseOptions.hasHeader
 		};
 		ensureWorker().postMessage(req);
 	}
 
 	function loadBytes(buffer: ArrayBuffer, name: string) {
-		rawBytes = buffer;
-		fileName = name;
-		filters = [];
-		sort = null;
+		sharedDocument.rawBytes = buffer;
+		sharedDocument.fileName = name;
+		sharedDocument.filters = [];
+		sharedDocument.sort = null;
 		searchQuery = '';
 		selectedColumn = null;
 		columnWidths = {};
@@ -158,7 +147,7 @@ Bug,Free,12,false
 	}
 
 	function onPaste(e: ClipboardEvent) {
-		if (sourceTable) return;
+		if (sharedDocument.sourceTable) return;
 		const text = e.clipboardData?.getData('text');
 		if (text?.trim()) {
 			e.preventDefault();
@@ -176,10 +165,10 @@ Bug,Free,12,false
 	});
 
 	function reset() {
-		sourceTable = null;
+		sharedDocument.sourceTable = null;
 		displayedTable = null;
-		rawBytes = null;
-		fileName = '';
+		sharedDocument.rawBytes = null;
+		sharedDocument.fileName = '';
 		error = null;
 		selectedColumn = null;
 		engineUsed = null;
@@ -189,12 +178,12 @@ Bug,Free,12,false
 	// filters and sort are kept as-is; if a column they reference no
 	// longer exists, applyOne/applyLog will just throw on the next use.
 	function updateParseOptions(next: Partial<CsvParseOptions>) {
-		parseOptions = { ...parseOptions, ...next };
-		if (rawBytes) parseBytes(rawBytes);
+		sharedDocument.parseOptions = { ...sharedDocument.parseOptions, ...next };
+		if (sharedDocument.rawBytes) parseBytes(sharedDocument.rawBytes);
 	}
 	function updateEncoding(next: string) {
-		encoding = next;
-		if (rawBytes) parseBytes(rawBytes);
+		sharedDocument.encoding = next;
+		if (sharedDocument.rawBytes) parseBytes(sharedDocument.rawBytes);
 	}
 
 	/** Autofocuses (and selects) the input a cell edit opens. */
@@ -293,12 +282,12 @@ Bug,Free,12,false
 	}
 
 	async function commitEditingCell() {
-		if (!editingCell || !sourceTable) return;
+		if (!editingCell || !sharedDocument.sourceTable) return;
 		const { rowId, column } = editingCell;
 		const value = editingDraft;
 		applying = true;
 		try {
-			sourceTable = await editCellInWorker(sourceTable, rowId, column, value);
+			sharedDocument.sourceTable = await editCellInWorker(sharedDocument.sourceTable, rowId, column, value);
 			editingCell = null;
 			error = null;
 		} catch (err) {
@@ -309,11 +298,11 @@ Bug,Free,12,false
 	}
 
 	const inspected = $derived(
-		sourceTable && selectedColumn
+		sharedDocument.sourceTable && selectedColumn
 			? {
 					name: selectedColumn,
-					meta: sourceTable.columns.find((c) => c.name === selectedColumn)!,
-					stats: columnStats(sourceTable.getColumn(selectedColumn))
+					meta: sharedDocument.sourceTable.columns.find((c) => c.name === selectedColumn)!,
+					stats: columnStats(sharedDocument.sourceTable.getColumn(selectedColumn))
 				}
 			: null
 	);
@@ -322,7 +311,7 @@ Bug,Free,12,false
 	// file, not the current filter/sort) — a quick "what am I dealing with"
 	// scan, separate from the rail's per-column deep dive.
 	const columnHealth = $derived.by(() => {
-		const table = sourceTable;
+		const table = sharedDocument.sourceTable;
 		if (!table) return [];
 		return table.columns.map((col) => ({
 			name: col.name,
@@ -342,10 +331,8 @@ Bug,Free,12,false
 	});
 
 	// --- Filters + sort: an operation-log, exactly what the pipeline is ---
-	type FilterPill = { id: number; params: FilterRowsParams };
-	let filters = $state<FilterPill[]>([]);
+	// Both live in sharedDocument, not here — see that module's comment.
 	let nextFilterId = 0;
-	let sort = $state<{ column: string; direction: 'asc' | 'desc' } | null>(null);
 	let searchQuery = $state('');
 
 	let showAddFilter = $state(false);
@@ -367,19 +354,19 @@ Bug,Free,12,false
 	function addFilter() {
 		if (!newFilterColumn) return;
 		const value = NEEDS_VALUE.includes(newFilterOperator)
-			? sourceTable?.columns.find((c) => c.name === newFilterColumn)?.type === 'number'
+			? sharedDocument.sourceTable?.columns.find((c) => c.name === newFilterColumn)?.type === 'number'
 				? Number(newFilterValue)
 				: newFilterValue
 			: undefined;
-		filters = [
-			...filters,
+		sharedDocument.filters = [
+			...sharedDocument.filters,
 			{ id: nextFilterId++, params: { column: newFilterColumn, operator: newFilterOperator, value } }
 		];
 		showAddFilter = false;
 		newFilterValue = '';
 	}
 	function removeFilter(id: number) {
-		filters = filters.filter((f) => f.id !== id);
+		sharedDocument.filters = sharedDocument.filters.filter((f) => f.id !== id);
 	}
 	function filterLabel(params: FilterRowsParams): string {
 		const opLabel = OPERATOR_LABELS[params.operator];
@@ -389,19 +376,19 @@ Bug,Free,12,false
 	}
 
 	function toggleSort(column: string) {
-		if (sort?.column !== column) sort = { column, direction: 'asc' };
-		else if (sort.direction === 'asc') sort = { column, direction: 'desc' };
-		else sort = null;
+		if (sharedDocument.sort?.column !== column) sharedDocument.sort = { column, direction: 'asc' };
+		else if (sharedDocument.sort.direction === 'asc') sharedDocument.sort = { column, direction: 'desc' };
+		else sharedDocument.sort = null;
 	}
 
-	let displayedTable = $state.raw<Table | null>(null); // see sourceTable's comment — same reason
+	let displayedTable = $state.raw<Table | null>(null); // same $state.raw reasoning as sourceTable in shared-document.svelte.ts
 
 	// Runs the filter/sort log in the worker whenever it (or the source
 	// table) changes. An empty log is the common case — just opened a
 	// file, no filters or sort yet — so it's handled inline with no
 	// worker round trip; nothing to apply.
 	$effect(() => {
-		if (!sourceTable) {
+		if (!sharedDocument.sourceTable) {
 			displayedTable = null;
 			return;
 		}
@@ -411,21 +398,21 @@ Bug,Free,12,false
 		// inside this $effect, uncaught, which was silently killing this
 		// effect's future reactivity — the actual cause behind sort/filter
 		// appearing to work once then stop responding to anything.
-		const log: OperationInvocation[] = filters.map((f) => ({
+		const log: OperationInvocation[] = sharedDocument.filters.map((f) => ({
 			opId: 'filter-rows',
 			params: $state.snapshot(f.params),
 			enabled: true
 		}));
-		if (sort) log.push({ opId: 'sort-rows', params: $state.snapshot(sort), enabled: true });
+		if (sharedDocument.sort) log.push({ opId: 'sort-rows', params: $state.snapshot(sharedDocument.sort), enabled: true });
 
 		if (log.length === 0) {
-			displayedTable = sourceTable;
+			displayedTable = sharedDocument.sourceTable;
 			engineUsed = null; // nothing ran — passthrough, not a decision either engine made
 			return;
 		}
 		applying = true;
 		const requestId = ++latestApplyRequestId;
-		const req: CsvWorkerRequest = { type: 'applyLog', requestId, tableIpc: sourceTable.toIPC(), log };
+		const req: CsvWorkerRequest = { type: 'applyLog', requestId, tableIpc: sharedDocument.sourceTable.toIPC(), log };
 		ensureWorker().postMessage(req);
 	});
 
@@ -528,13 +515,9 @@ Bug,Free,12,false
 		}
 	}
 
-	// Hands the current view off to the Convert route (see shared-document's
-	// own comment) — mirrored on every change, not just on navigation, so
-	// Convert is never looking at a stale table if it's already open in
-	// another tab.
+	// Hands the current (filtered/sorted) view off to the Convert route.
 	$effect(() => {
 		sharedDocument.table = displayedTable;
-		sharedDocument.fileName = fileName;
 	});
 </script>
 
@@ -555,7 +538,7 @@ Bug,Free,12,false
 	<div class="file-bar">
 		<a class="wordmark" href="/">csv<span class="dot">.</span></a>
 		<a class="pill" href="https://bundle.tools">part of Bundle</a>
-		{#if sourceTable}
+		{#if sharedDocument.sourceTable}
 			<div class="file-chip">
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none">
 					<path
@@ -564,12 +547,12 @@ Bug,Free,12,false
 						stroke-width="1.8"
 					/>
 				</svg>
-				<span class="file-name">{fileName}</span>
-				<span class="file-meta">{sourceTable.rowCount} rows · {sourceTable.columns.length} cols</span>
+				<span class="file-name">{sharedDocument.fileName}</span>
+				<span class="file-meta">{sharedDocument.sourceTable.rowCount} rows · {sharedDocument.sourceTable.columns.length} cols</span>
 			</div>
 		{/if}
 		<div class="file-bar-right">
-			{#if sourceTable}
+			{#if sharedDocument.sourceTable}
 				<span class="privacy-note">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
 						<rect x="5" y="10" width="14" height="10" rx="2" stroke="var(--ink)" stroke-width="2.2" />
@@ -584,7 +567,7 @@ Bug,Free,12,false
 		</div>
 	</div>
 
-	{#if sourceTable}
+	{#if sharedDocument.sourceTable}
 		<div class="column-strip">
 			<div class="column-strip-head">
 				<span class="strip-label">Columns, type, gaps, spread</span>
@@ -662,7 +645,7 @@ Bug,Free,12,false
 							{#each [[',', 'Comma'], [';', 'Semicolon'], ['\t', 'Tab']] as [value, label] (value)}
 								<button
 									type="button"
-									class:active={parseOptions.delimiter === value}
+									class:active={sharedDocument.parseOptions.delimiter === value}
 									onclick={() => updateParseOptions({ delimiter: value })}
 								>
 									{label}
@@ -674,7 +657,7 @@ Bug,Free,12,false
 							<span>First row is a header</span>
 							<input
 								type="checkbox"
-								checked={parseOptions.hasHeader}
+								checked={sharedDocument.parseOptions.hasHeader}
 								onchange={(e) => updateParseOptions({ hasHeader: e.currentTarget.checked })}
 							/>
 						</label>
@@ -682,7 +665,7 @@ Bug,Free,12,false
 						<span class="popover-label">Encoding</span>
 						<select
 							class="encoding-select"
-							value={encoding}
+							value={sharedDocument.encoding}
 							onchange={(e) => updateEncoding(e.currentTarget.value)}
 						>
 							{#each ENCODINGS as opt (opt.value)}
@@ -696,7 +679,7 @@ Bug,Free,12,false
 			<span class="toolbar-rule"></span>
 
 			<span class="toolbar-label">Filters</span>
-			{#each filters as f (f.id)}
+			{#each sharedDocument.filters as f (f.id)}
 				<span class="pill filter-pill">
 					{filterLabel(f.params)}
 					<button type="button" onclick={() => removeFilter(f.id)} aria-label="Remove filter">×</button>
@@ -711,7 +694,7 @@ Bug,Free,12,false
 				<div class="add-filter-form">
 					<select bind:value={newFilterColumn}>
 						<option value="">Column</option>
-						{#each sourceTable.columns as col (col.name)}
+						{#each sharedDocument.sourceTable.columns as col (col.name)}
 							<option value={col.name}>{col.name}</option>
 						{/each}
 					</select>
@@ -727,11 +710,11 @@ Bug,Free,12,false
 				</div>
 			{/if}
 
-			{#if sort}
+			{#if sharedDocument.sort}
 				<span class="toolbar-rule"></span>
 				<span class="pill sort-pill">
-					{sort.column} {sort.direction === 'asc' ? '↑' : '↓'}
-					<button type="button" onclick={() => (sort = null)} aria-label="Clear sort">×</button>
+					{sharedDocument.sort.column} {sharedDocument.sort.direction === 'asc' ? '↑' : '↓'}
+					<button type="button" onclick={() => (sharedDocument.sort = null)} aria-label="Clear sort">×</button>
 				</span>
 			{/if}
 
@@ -745,7 +728,7 @@ Bug,Free,12,false
 		</div>
 	{/if}
 
-	{#if !sourceTable}
+	{#if !sharedDocument.sourceTable}
 		{#snippet dropContent()}
 			<svg width="48" height="48" viewBox="0 0 48 48" fill="none" class="drop-icon">
 				<rect x="9" y="4" width="26" height="34" rx="3" fill="var(--panel-2)" stroke="var(--ink)" stroke-width="2.4" />
@@ -884,7 +867,7 @@ Bug,Free,12,false
 				{#if applying}
 					<div class="applying-overlay">
 						<span class="applying-spinner"></span>
-						{sort ? 'Sorting…' : 'Filtering…'}
+						{sharedDocument.sort ? 'Sorting…' : 'Filtering…'}
 					</div>
 				{/if}
 				<table style="width: {totalTableWidth}px">
@@ -901,7 +884,7 @@ Bug,Free,12,false
 								<th
 									data-col={col.name}
 									class:selected-col={selectedColumn === col.name}
-									class:sorted-col={sort?.column === col.name}
+									class:sorted-col={sharedDocument.sort?.column === col.name}
 								>
 									<button type="button" class="th-content" onclick={() => selectColumn(col.name)}>
 										<span class="col-name">{col.name}</span>
@@ -916,7 +899,11 @@ Bug,Free,12,false
 										}}
 										aria-label="Sort by {col.name}"
 									>
-										{sort?.column === col.name ? (sort.direction === 'asc' ? '↑' : '↓') : '↕'}
+										{sharedDocument.sort?.column === col.name
+											? sharedDocument.sort.direction === 'asc'
+												? '↑'
+												: '↓'
+											: '↕'}
 									</button>
 									<div
 										class="col-resize"
@@ -946,7 +933,7 @@ Bug,Free,12,false
 										data-col={col.name}
 										class:numeric={col.type === 'number'}
 										class:selected-col={selectedColumn === col.name}
-										class:sorted-col={sort?.column === col.name}
+										class:sorted-col={sharedDocument.sort?.column === col.name}
 										class:editing-cell={isEditing}
 										ondblclick={() => startEditingCell(row, col.name)}
 									>
@@ -1041,15 +1028,15 @@ Bug,Free,12,false
 
 		<footer class="status-bar">
 			<span>
-				{totalVisibleRows} of {sourceTable?.rowCount} rows shown
-				{#if filters.length > 0}
-					· {filters.length} filter{filters.length === 1 ? '' : 's'}
+				{totalVisibleRows} of {sharedDocument.sourceTable?.rowCount} rows shown
+				{#if sharedDocument.filters.length > 0}
+					· {sharedDocument.filters.length} filter{sharedDocument.filters.length === 1 ? '' : 's'}
 				{/if}
-				{#if sort}
-					· sorted by {sort.column} {sort.direction === 'asc' ? '↑' : '↓'}
+				{#if sharedDocument.sort}
+					· sorted by {sharedDocument.sort.column} {sharedDocument.sort.direction === 'asc' ? '↑' : '↓'}
 				{/if}
 				{#if engineUsed === 'duckdb'}
-					· via DuckDB ({sourceTable?.rowCount.toLocaleString()} rows)
+					· via DuckDB ({sharedDocument.sourceTable?.rowCount.toLocaleString()} rows)
 				{/if}
 			</span>
 			<span class="privacy-note">Everything stays on your device.</span>
