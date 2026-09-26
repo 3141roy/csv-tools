@@ -6,7 +6,7 @@
 	import type { CsvParseOptions } from '$lib/formats/csv/parse';
 	import { ENCODINGS } from '$lib/formats/csv/decode';
 	import { columnStats } from '$lib/core/column-stats';
-	import { sharedDocument } from '$lib/state/shared-document.svelte';
+	import { sharedDocument, type FilterPill } from '$lib/state/shared-document.svelte';
 	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
 	import type { FilterRowsParams } from '$lib/operations/filter-rows/manifest';
 	import CsvWorker from '../../workers/csv.worker?worker';
@@ -336,6 +336,7 @@ Bug,Free,12,false
 	let searchQuery = $state('');
 
 	let showAddFilter = $state(false);
+	let editingFilterId = $state<number | null>(null);
 	let newFilterColumn = $state('');
 	let newFilterOperator = $state<FilterRowsParams['operator']>('contains');
 	let newFilterValue = $state('');
@@ -358,15 +359,27 @@ Bug,Free,12,false
 				? Number(newFilterValue)
 				: newFilterValue
 			: undefined;
-		sharedDocument.filters = [
-			...sharedDocument.filters,
-			{ id: nextFilterId++, params: { column: newFilterColumn, operator: newFilterOperator, value } }
-		];
-		showAddFilter = false;
-		newFilterValue = '';
+		const params = { column: newFilterColumn, operator: newFilterOperator, value };
+		sharedDocument.filters =
+			editingFilterId !== null
+				? sharedDocument.filters.map((f) => (f.id === editingFilterId ? { ...f, params } : f))
+				: [...sharedDocument.filters, { id: nextFilterId++, params }];
+		closeFilterForm();
 	}
 	function removeFilter(id: number) {
 		sharedDocument.filters = sharedDocument.filters.filter((f) => f.id !== id);
+	}
+	function editFilter(f: FilterPill) {
+		editingFilterId = f.id;
+		newFilterColumn = f.params.column;
+		newFilterOperator = f.params.operator;
+		newFilterValue = f.params.value === undefined ? '' : String(f.params.value);
+		showAddFilter = true;
+	}
+	function closeFilterForm() {
+		showAddFilter = false;
+		editingFilterId = null;
+		newFilterValue = '';
 	}
 	function filterLabel(params: FilterRowsParams): string {
 		const opLabel = OPERATOR_LABELS[params.operator];
@@ -697,9 +710,24 @@ Bug,Free,12,false
 
 			<span class="toolbar-label">Filters</span>
 			{#each sharedDocument.filters as f (f.id)}
-				<span class="pill filter-pill">
+				<span
+					class="pill filter-pill"
+					role="button"
+					tabindex="0"
+					ondblclick={() => editFilter(f)}
+					title="Double-click to edit"
+				>
 					{filterLabel(f.params)}
-					<button type="button" onclick={() => removeFilter(f.id)} aria-label="Remove filter">×</button>
+					<button
+						type="button"
+						onclick={(e) => {
+							e.stopPropagation();
+							removeFilter(f.id);
+						}}
+						aria-label="Remove filter"
+					>
+						×
+					</button>
 				</span>
 			{/each}
 
@@ -708,7 +736,10 @@ Bug,Free,12,false
 					type="button"
 					class="pill add-filter"
 					onclick={() => {
+						editingFilterId = null;
 						newFilterColumn = sharedDocument.sourceTable?.columns[0]?.name ?? '';
+						newFilterOperator = 'contains';
+						newFilterValue = '';
 						showAddFilter = true;
 					}}
 				>
@@ -735,7 +766,10 @@ Bug,Free,12,false
 					{#if NEEDS_VALUE.includes(newFilterOperator)}
 						<input type="text" bind:value={newFilterValue} placeholder="Value" />
 					{/if}
-					<button type="submit" class="btn btn-secondary btn-sm">Add</button>
+					<button type="submit" class="btn btn-secondary btn-sm">
+						{editingFilterId !== null ? 'Update' : 'Add'}
+					</button>
+					<button type="button" class="btn btn-secondary btn-sm" onclick={closeFilterForm}>Cancel</button>
 				</form>
 			{/if}
 
@@ -1310,6 +1344,7 @@ Bug,Free,12,false
 	.filter-pill {
 		background: var(--sky);
 		color: var(--ink-on-accent);
+		cursor: pointer;
 	}
 	.sort-pill {
 		background: var(--lav);
