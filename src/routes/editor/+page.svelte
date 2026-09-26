@@ -554,6 +554,7 @@ Bug,Free,12,false
 <div class="editor">
 	<div class="file-bar">
 		<a class="wordmark" href="/">csv<span class="dot">.</span></a>
+		<a class="pill" href="https://bundle.tools">part of Bundle</a>
 		{#if sourceTable}
 			<div class="file-chip">
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -1076,6 +1077,14 @@ Bug,Free,12,false
 		font-weight: 700;
 		font-size: 24px;
 		color: var(--ink);
+	}
+	.pill {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--ink-2);
+		border: 2px solid var(--ink);
+		border-radius: 999px;
+		padding: 3px 10px;
 	}
 	.dot {
 		color: var(--terra);

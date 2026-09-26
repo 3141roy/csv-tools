@@ -92,10 +92,11 @@
   --lav-d: #b39df0;
   --lime-d: #a9c93e;
   --terra-d: #f0916a;
-  --shadow-hard: none;
-  --shadow-hard-sm: none;
-  --shadow-hard-lg: none;
-  --shadow-press: none;
-  --shadow-press-sm: none;
+  /* Translucent black, not ink (cream) — a cream offset shadow reads as a glow here. */
+  --shadow-hard: 5px 5px 0 rgba(0, 0, 0, 0.5);
+  --shadow-hard-sm: 3px 3px 0 rgba(0, 0, 0, 0.5);
+  --shadow-hard-lg: 6px 6px 0 rgba(0, 0, 0, 0.5);
+  --shadow-press: 3px 3px 0 rgba(0, 0, 0, 0.5);
+  --shadow-press-sm: 2px 2px 0 rgba(0, 0, 0, 0.5);
   --hairline: rgba(240, 234, 217, 0.14);
 }

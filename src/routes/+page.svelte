@@ -516,6 +516,10 @@
 		height: auto;
 		overflow: visible;
 	}
+	/* Pastels tuned for cream paper read as neon against near-black. */
+	:global(:root[data-theme='dark']) .totem {
+		filter: saturate(0.8) brightness(0.88);
+	}
 
 	/* Scattered cluster instead of a stacked column: each shape gets its own
 	   tilt and offset, and leans in a little further on hover, staggered so
