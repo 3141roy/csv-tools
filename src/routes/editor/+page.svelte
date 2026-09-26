@@ -428,6 +428,23 @@ Bug,Free,12,false
 		searchDebounceTimer = setTimeout(() => (debouncedSearch = value), 150);
 	}
 
+	function escapeRegExp(s: string): string {
+		return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	}
+
+	// Reused across every cell's .split() call — safe: String.split ignores
+	// a global regex's statefulness, unlike .exec()/.test().
+	const highlightRegex = $derived.by(() => {
+		const q = debouncedSearch.trim();
+		return q ? new RegExp(`(${escapeRegExp(q)})`, 'gi') : null;
+	});
+
+	function cellSegments(value: unknown): { text: string; match: boolean }[] {
+		const text = value === null || value === undefined ? '' : String(value);
+		if (!highlightRegex) return [{ text, match: false }];
+		return text.split(highlightRegex).map((part, i) => ({ text: part, match: i % 2 === 1 }));
+	}
+
 	const searchFilteredRows = $derived.by(() => {
 		if (!displayedTable || !debouncedSearch.trim()) return null;
 		const q = debouncedSearch.toLowerCase();
@@ -955,11 +972,7 @@ Bug,Free,12,false
 												}}
 												use:focusOnMount
 											/>
-										{:else}
-											{row[col.name] === null || row[col.name] === undefined
-												? ''
-												: String(row[col.name])}
-										{/if}
+										{:else}{#each cellSegments(row[col.name]) as seg, i (i)}{#if seg.match}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}{/if}
 									</td>
 								{/each}
 							</tr>
@@ -1833,6 +1846,12 @@ Bug,Free,12,false
 	}
 	tbody td {
 		border-bottom: 1px solid var(--hairline);
+	}
+	tbody td mark {
+		background: var(--lime);
+		color: var(--ink-on-accent);
+		border-radius: 3px;
+		padding: 0 1px;
 	}
 	td.numeric {
 		text-align: right;
