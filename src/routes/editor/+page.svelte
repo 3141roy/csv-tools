@@ -5,9 +5,8 @@
 	import type { OperationInvocation } from '$lib/core/types';
 	import type { CsvParseOptions } from '$lib/formats/csv/parse';
 	import { ENCODINGS } from '$lib/formats/csv/decode';
-	import { tableToCsv } from '$lib/formats/csv/serialize';
-	import { tableToJson } from '$lib/formats/json/serialize';
 	import { columnStats } from '$lib/core/column-stats';
+	import { sharedDocument } from '$lib/state/shared-document.svelte';
 	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
 	import type { FilterRowsParams } from '$lib/operations/filter-rows/manifest';
 	import CsvWorker from '../../workers/csv.worker?worker';
@@ -529,27 +528,14 @@ Bug,Free,12,false
 		}
 	}
 
-	// --- Export ---
-	let exportOpen = $state(false);
-	function download(content: string, filename: string, mimeType: string) {
-		const blob = new Blob([content], { type: mimeType });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = filename;
-		a.click();
-		URL.revokeObjectURL(url);
-	}
-	function exportCsv() {
-		if (!displayedTable) return;
-		download(tableToCsv(displayedTable), fileName.replace(/\.csv$/i, '') + '.csv', 'text/csv');
-		exportOpen = false;
-	}
-	function exportJson() {
-		if (!displayedTable) return;
-		download(tableToJson(displayedTable), fileName.replace(/\.csv$/i, '') + '.json', 'application/json');
-		exportOpen = false;
-	}
+	// Hands the current view off to the Convert route (see shared-document's
+	// own comment) — mirrored on every change, not just on navigation, so
+	// Convert is never looking at a stale table if it's already open in
+	// another tab.
+	$effect(() => {
+		sharedDocument.table = displayedTable;
+		sharedDocument.fileName = fileName;
+	});
 </script>
 
 <svelte:window onpaste={onPaste} onclick={onWindowClick} />
@@ -591,20 +577,7 @@ Bug,Free,12,false
 					On your device
 				</span>
 				<button type="button" class="btn btn-secondary" onclick={reset}>Change file</button>
-				<div class="export-wrap">
-					<button type="button" class="btn btn-primary" onclick={() => (exportOpen = !exportOpen)}>
-						Export
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-							<path d="M6 9l6 6 6-6" stroke="var(--ink-on-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-						</svg>
-					</button>
-					{#if exportOpen}
-						<div class="export-menu">
-							<button type="button" onclick={exportCsv}>Export as CSV</button>
-							<button type="button" onclick={exportJson}>Export as JSON</button>
-						</div>
-					{/if}
-				</div>
+				<a class="btn btn-primary" href="/convert">Convert</a>
 			{/if}
 			<ThemeToggle />
 		</div>
@@ -1162,37 +1135,6 @@ Bug,Free,12,false
 		padding: 6px 12px;
 		font-size: 13px;
 		box-shadow: var(--shadow-hard-sm);
-	}
-
-	.export-wrap {
-		position: relative;
-	}
-	.export-menu {
-		position: absolute;
-		top: calc(100% + 6px);
-		right: 0;
-		z-index: 5;
-		display: flex;
-		flex-direction: column;
-		background: var(--panel);
-		border: var(--border-w) solid var(--ink);
-		border-radius: 10px;
-		box-shadow: var(--shadow-hard);
-		overflow: hidden;
-		min-width: 160px;
-	}
-	.export-menu button {
-		background: none;
-		border: none;
-		text-align: left;
-		padding: 10px 14px;
-		font: inherit;
-		font-weight: 600;
-		color: var(--ink);
-		cursor: pointer;
-	}
-	.export-menu button:hover {
-		background: var(--panel-2);
 	}
 
 	/* COLUMN HEALTH STRIP */
