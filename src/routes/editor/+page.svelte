@@ -704,7 +704,14 @@ Bug,Free,12,false
 			{/each}
 
 			{#if !showAddFilter}
-				<button type="button" class="pill add-filter" onclick={() => (showAddFilter = true)}>
+				<button
+					type="button"
+					class="pill add-filter"
+					onclick={() => {
+						newFilterColumn = sharedDocument.sourceTable?.columns[0]?.name ?? '';
+						showAddFilter = true;
+					}}
+				>
 					+ Filter
 				</button>
 			{:else}
@@ -716,7 +723,6 @@ Bug,Free,12,false
 					}}
 				>
 					<select bind:value={newFilterColumn}>
-						<option value="">Column</option>
 						{#each sharedDocument.sourceTable.columns as col (col.name)}
 							<option value={col.name}>{col.name}</option>
 						{/each}
