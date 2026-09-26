@@ -691,7 +691,13 @@ Bug,Free,12,false
 					+ Filter
 				</button>
 			{:else}
-				<div class="add-filter-form">
+				<form
+					class="add-filter-form"
+					onsubmit={(e) => {
+						e.preventDefault();
+						addFilter();
+					}}
+				>
 					<select bind:value={newFilterColumn}>
 						<option value="">Column</option>
 						{#each sharedDocument.sourceTable.columns as col (col.name)}
@@ -706,8 +712,8 @@ Bug,Free,12,false
 					{#if NEEDS_VALUE.includes(newFilterOperator)}
 						<input type="text" bind:value={newFilterValue} placeholder="Value" />
 					{/if}
-					<button type="button" class="btn btn-secondary btn-sm" onclick={addFilter}>Add</button>
-				</div>
+					<button type="submit" class="btn btn-secondary btn-sm">Add</button>
+				</form>
 			{/if}
 
 			{#if sharedDocument.sort}
