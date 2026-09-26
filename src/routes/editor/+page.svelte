@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { Table, fromIPC, ROW_ID_COLUMN } from '$lib/core/table';
 	import type { OperationInvocation } from '$lib/core/types';
@@ -492,6 +492,21 @@ Bug,Free,12,false
 			? searchFilteredRows.slice(start, end)
 			: (displayedTable?.getRows(start, end) ?? []);
 		return rows.map((row, i) => ({ row, index: start + i }));
+	});
+
+	// Auto-fit every column to its content as soon as a file's first page is
+	// on screen, instead of leaving everyone stuck at DEFAULT_COL_WIDTH until
+	// they manually double-click each divider. Gated on columnWidths being
+	// empty so it only fires once per load (loadBytes resets it to {}) and
+	// never fights a resize/autofit the user already did.
+	$effect(() => {
+		if (!displayedTable || Object.keys(columnWidths).length > 0) return;
+		const cols = displayedTable.columns;
+		const rows = pageRows;
+		tick().then(() => {
+			if (rows !== pageRows) return; // superseded before the DOM caught up
+			for (const col of cols) autoFitColumn(col);
+		});
 	});
 
 	// table-layout: fixed only actually clips a cell's unbreakable content
